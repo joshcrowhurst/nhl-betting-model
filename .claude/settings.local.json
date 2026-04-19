@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" https://api-web.nhle.com/v1/schedule/2024-10-08)",
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" https://api-web.nhle.com/v1/club-schedule-season/TOR/20242025)",
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" https://api-web.nhle.com/v1/standings/2024-10-15)",
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" https://api-web.nhle.com/v1/schedule/now)",
+      "Bash(curl -s https://api-web.nhle.com/v1/schedule/2024-10-08)",
+      "Bash(curl -s https://api-web.nhle.com/v1/club-schedule-season/TOR/20242025)",
+      "Bash(curl -s -w \"\\\\nStatus: %{http_code}\\\\n\" https://api-web.nhle.com/v1/schedule/now)",
+      "WebFetch(domain:api-web.nhle.com)",
+      "Bash(curl -s \"https://api-web.nhle.com/v1/schedule/2024-10-08\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"https://api-web.nhle.com/v1/gamecenter/2024020003/landing\")",
+      "Bash(npx create-react-app *)"
+    ]
+  }
+}

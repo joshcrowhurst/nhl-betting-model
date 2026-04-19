@@ -1,0 +1,50 @@
+steps:
+  # Build the container image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - build
+      - -t
+      - "gcr.io/$PROJECT_ID/nhl-model:$COMMIT_SHA"
+      - -t
+      - "gcr.io/$PROJECT_ID/nhl-model:latest"
+      - .
+
+  # Push to Container Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - push
+      - "--all-tags"
+      - "gcr.io/$PROJECT_ID/nhl-model"
+
+  # Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - nhl-model
+      - --image=gcr.io/$PROJECT_ID/nhl-model:$COMMIT_SHA
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --set-cloudsql-instances=$_INSTANCE_CONNECTION_NAME
+      - --set-env-vars=INSTANCE_CONNECTION_NAME=$_INSTANCE_CONNECTION_NAME,DB_USER=$_DB_USER,DB_NAME=$_DB_NAME,GCS_BUCKET=$_GCS_BUCKET
+      - --set-secrets=DB_PASS=nhl-db-pass:latest,ODDS_API_KEY=nhl-odds-api-key:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,JOB_SECRET=nhl-job-secret:latest
+      - --timeout=3600
+      - --memory=2Gi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=2
+
+images:
+  - "gcr.io/$PROJECT_ID/nhl-model:$COMMIT_SHA"
+  - "gcr.io/$PROJECT_ID/nhl-model:latest"
+
+substitutions:
+  _INSTANCE_CONNECTION_NAME: "josh-crowhurt-personal-bq:us-central1:nhl-db"
+  _DB_USER: "nhl"
+  _DB_NAME: "nhl_betting"
+  _GCS_BUCKET: "nhl-betting-model"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
