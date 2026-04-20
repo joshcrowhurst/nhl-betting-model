@@ -184,13 +184,13 @@ def run_predict_job() -> dict:
                 saved += 1
                 predictions_for_email.append(p)
 
+            # Send email inside session so ORM objects are still attached
+            if predictions_for_email:
+                from src.api.email_sender import send_predictions_email
+                send_predictions_email(predictions_for_email, today)
+
         log_run("predict", "success", games_processed=saved)
         logger.info(f"Predict job complete — {saved} games saved")
-
-        # Send email (import here to avoid circular)
-        if predictions_for_email:
-            from src.api.email_sender import send_predictions_email
-            send_predictions_email(predictions_for_email, today)
 
         return {"status": "success", "games": saved}
 
