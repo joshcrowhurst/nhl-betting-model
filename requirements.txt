@@ -1,6 +1,6 @@
 # Core ML
 xgboost>=2.0
-scikit-learn>=1.4
+scikit-learn>=1.4,<1.8
 pandas>=2.1
 numpy>=1.26
 pyarrow>=14.0
