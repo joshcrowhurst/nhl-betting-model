@@ -209,6 +209,22 @@ def run_resolve_job() -> dict:
 
     try:
         df, _ = _fetch_games(num_seasons=1)
+
+        # Also pull recent playoff games (not included in season schedule)
+        import pandas as pd
+        from datetime import timedelta
+        for days_ago in range(0, 7):
+            d = date.today() - timedelta(days=days_ago)
+            try:
+                day_games = get_games_for_date(d, game_types=(2, 3))
+                if not day_games.empty:
+                    df = pd.concat(
+                        [df, day_games[~day_games["game_id"].isin(df["game_id"])]],
+                        ignore_index=True
+                    )
+            except Exception:
+                pass
+
         completed = df[df["home_win"].notna()].set_index("game_id")
 
         resolved = 0
