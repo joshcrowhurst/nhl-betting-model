@@ -232,17 +232,28 @@ def cmd_compare_goalie(args) -> None:
 
     full = get_feature_cols(include_market=False)
     starter_cols = ["starter_sv_pct_diff", "home_starter_share_l10", "away_starter_share_l10"]
-    variants = {"baseline": [c for c in full if c not in starter_cols], "with starting goalie": full}
+    base = [c for c in full if c not in starter_cols]
+    # The default XGBoost settings fit training data far better than new games
+    # (train AUC ~0.9 vs ~0.6 out of sample), so also test a heavily
+    # regularized model: weak signals like goalie form may only show up there.
+    regularized = {"n_estimators": 300, "max_depth": 2, "learning_rate": 0.03,
+                   "min_child_weight": 50, "subsample": 0.7, "colsample_bytree": 0.7, "reg_lambda": 10.0}
+    variants = {
+        "baseline": (base, None),
+        "with starting goalie": (full, None),
+        "regularized baseline": (base, regularized),
+        "regularized + starting goalie": (full, regularized),
+    }
 
     test = features[features["date"] >= pd.Timestamp(args.start_date)]
     backup = test[(test["home_starter_share_l10"] < 0.5) | (test["away_starter_share_l10"] < 0.5)]["game_id"]
     coverage = test["starter_sv_pct_diff"].notna().mean()
 
     results = {}
-    for name, cols in variants.items():
+    for name, (cols, params) in variants.items():
         logger.info(f"Backtesting: {name} ({len(cols)} features)")
         res = run_backtest(features, BacktestConfig(start_date=args.start_date, retrain_every=args.retrain_every,
-                                                    feature_cols=cols))
+                                                    feature_cols=cols, params=params))
         preds = res.predictions
         sub = preds[preds["game_id"].isin(backup)]
         results[name] = {

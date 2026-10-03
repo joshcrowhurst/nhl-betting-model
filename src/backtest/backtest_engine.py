@@ -34,6 +34,7 @@ class BacktestConfig:
     retrain_every: int = WALK_FORWARD_RETRAIN_FREQ  # retrain after N test games
     include_market: bool = False       # include market odds feature
     feature_cols: list = None          # override the default feature list
+    params: dict = None                # override XGBoost params
 
 
 @dataclass
@@ -87,7 +88,8 @@ def run_backtest(
                 features_df[base_cols].notna().all(axis=1)
             ]
             if len(train_data) >= config.min_train_games:
-                current_model = MoneylineModel(include_market=config.include_market, feature_cols=feature_cols)
+                current_model = MoneylineModel(params=config.params, include_market=config.include_market,
+                                               feature_cols=feature_cols)
                 current_model.train(train_data, train_data["home_win"], calibrate=True)
                 games_since_retrain = 0
                 logger.debug(f"Retrained on {len(train_data)} games up to {row['date'].date()}")
