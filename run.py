@@ -7,6 +7,8 @@ Usage examples:
   python run.py resolve               # fill in yesterday's results
   python run.py summary               # show forward test P&L
   python run.py fetch --seasons 3     # just fetch/cache data
+  python run.py daily                 # resolve + predict + email (what GitHub Actions runs)
+  python run.py site --out _site      # build the static dashboard
 """
 
 import argparse
@@ -219,6 +221,17 @@ def cmd_train_and_save(args) -> None:
     print(f"Model saved to {path}")
 
 
+def cmd_daily(args) -> None:
+    from src.pipeline.daily import run
+    tasks = {t.strip() for t in args.tasks.split(",") if t.strip()}
+    run(tasks, send_email=not args.no_email, force_email=args.force_email)
+
+
+def cmd_site(args) -> None:
+    from src.pipeline.site import build
+    print(f"Site built in {build(Path(args.out))}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NHL Betting Model")
     sub = parser.add_subparsers(dest="command")
@@ -251,6 +264,16 @@ if __name__ == "__main__":
     p_fetch = sub.add_parser("fetch", help="Fetch and cache NHL data")
     p_fetch.add_argument("--seasons", type=int, default=5)
     p_fetch.set_defaults(func=lambda a: fetch_data(a.seasons))
+
+    p_daily = sub.add_parser("daily", help="Scheduled pipeline: resolve, retrain, predict, email")
+    p_daily.add_argument("--tasks", default="resolve,predict", help="Comma list of resolve,retrain,predict")
+    p_daily.add_argument("--no-email", action="store_true")
+    p_daily.add_argument("--force-email", action="store_true", help="Email today's picks even if none are new")
+    p_daily.set_defaults(func=cmd_daily)
+
+    p_site = sub.add_parser("site", help="Build the static dashboard")
+    p_site.add_argument("--out", default="_site")
+    p_site.set_defaults(func=cmd_site)
 
     args = parser.parse_args()
     if args.command is None:

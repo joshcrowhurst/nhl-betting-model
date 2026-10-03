@@ -43,7 +43,9 @@ def get_season_schedule(season: str) -> pd.DataFrame:
     follows nextStartDate until past May (end of playoffs).
     """
     cache_path = RAW_DIR / f"schedule_{season}.parquet"
-    if cache_path.exists():
+    # Past seasons never change; the current season is refetched so new
+    # results come in (it's ~30 paginated requests, a few seconds).
+    if cache_path.exists() and season != current_season_code():
         return pd.read_parquet(cache_path)
 
     year = int(season[:4])

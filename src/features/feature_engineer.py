@@ -82,11 +82,16 @@ def build_features(
     games: pd.DataFrame,
     enriched: pd.DataFrame = None,
     odds: pd.DataFrame = None,
+    target_ids=None,
 ) -> pd.DataFrame:
     """
     games:    schedule DataFrame from nhl_api — one row per completed game
     enriched: optional boxscore stats from boxscore_enricher — merged by game_id
     odds:     optional consensus odds DataFrame
+    target_ids: optional game_ids to build rows for. Elo is still computed over
+              every game, but per-row features (the slow O(n^2) part) are only
+              built for these. Daily predictions use this to go from minutes
+              per game to well under a second.
 
     Returns feature DataFrame with target column 'home_win'.
     """
@@ -110,8 +115,10 @@ def build_features(
     # Compute Elo ratings in chronological order (mutates a dict in-place)
     elo_ratings = _compute_elo_series(games)
 
+    rows_to_build = games if target_ids is None else games[games["game_id"].isin(set(target_ids))]
+
     feature_rows = []
-    for idx, row in games.iterrows():
+    for idx, row in rows_to_build.iterrows():
         prior = games[games["date"] < row["date"]]
         features = _build_row_features(row, prior, elo_ratings)
         if features is not None:

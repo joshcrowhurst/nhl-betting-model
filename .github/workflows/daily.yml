@@ -1,0 +1,97 @@
+name: Daily NHL picks
+
+on:
+  schedule:
+    # Times are UTC. GitHub may start scheduled runs late, so the second run is
+    # a safety net; it only predicts games the first run missed.
+    - cron: "17 14 * * *"   # ~10:17 AM ET (9:17 AM in winter): resolve, predict, email
+    - cron: "43 17 * * *"   # ~1:43 PM ET: catch-up if the morning run was late or failed
+    - cron: "29 8 * * 1"    # Monday ~4:29 AM ET: resolve + weekly retrain
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "Comma list of resolve, retrain, predict"
+        default: "resolve,predict"
+      force_email:
+        description: "Email today's picks even if none are new"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # push the state branch
+  pages: write
+  id-token: write
+
+concurrency:
+  group: nhl-daily
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    # The very first run downloads ~6 seasons of boxscores (~45 min) and trains.
+    # Later runs take a few minutes.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Load state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/state.sh pull
+
+      - name: Run pipeline
+        env:
+          NHL_DATA_DIR: state/data
+          NHL_MODELS_DIR: state/models
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TASKS="${{ inputs.tasks }}"
+            [ "${{ inputs.force_email }}" = "true" ] && EXTRA="--force-email"
+          elif [ "${{ github.event.schedule }}" = "29 8 * * 1" ]; then
+            TASKS="resolve,retrain"
+          else
+            TASKS="resolve,predict"
+          fi
+          python run.py daily --tasks "$TASKS" ${EXTRA:-}
+
+      - name: Save state
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/state.sh push
+
+      - name: Build dashboard
+        if: always()
+        env:
+          NHL_DATA_DIR: state/data
+          NHL_MODELS_DIR: state/models
+        run: python run.py site --out _site
+
+      - uses: actions/upload-pages-artifact@v3
+        if: always()
+        with:
+          path: _site
+
+  deploy-dashboard:
+    needs: pipeline
+    if: always() && needs.pipeline.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

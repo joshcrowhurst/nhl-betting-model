@@ -63,20 +63,20 @@ def predict_today(
     existing_ids = _load_logged_ids()
     predictions = []
 
+    # build_features drops rows with null home_win, so give today's games a dummy
+    # value. Features only use strictly earlier dates, so it can't leak. One call
+    # for all of today's games, building rows only for those games.
+    todays_rows = today_games.assign(home_win=0.0)
+    combined = pd.concat([prior_games, todays_rows], ignore_index=True)
+    all_features = build_features(combined, enriched=enriched, target_ids=today_games["game_id"])
+
     for _, game in today_games.iterrows():
         if game["game_id"] in existing_ids:
             logger.debug(f"Skipping already-logged game {game['game_id']}")
             continue
 
-        # build_features drops rows with null home_win, so temporarily set a dummy
-        # value so today's game passes through the filter. It only uses prior dates
-        # for its own features so the dummy doesn't affect anything.
-        game_row = game.copy()
-        game_row["home_win"] = 0.0
-
-        combined = pd.concat([prior_games, pd.DataFrame([game_row])], ignore_index=True)
-        features = build_features(combined, enriched=enriched)
-        game_features = features[features["game_id"] == game["game_id"]]
+        game_features = (all_features[all_features["game_id"] == game["game_id"]]
+                         if not all_features.empty else all_features)
 
         if game_features.empty:
             logger.warning(f"Could not build features for {game['game_id']} — insufficient history")

@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<title>NHL Model</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23C8102E'/><path d='M16 6c2 5 7 7 7 13a7 7 0 0 1-14 0c0-3 2-5 3-6 0 3 1 4 2 4 0-4 0-7 2-11z' fill='%23F1BE48'/></svg>">
+<style>
+  :root {
+    --red: #C8102E;
+    --red-dark: #9E0B23;
+    --red-tint: #FCEBEE;
+    --gold: #F1BE48;
+    --gold-tint: #FDF4DD;
+    --ink: #1A1A1A;
+    --ink-2: #4A4542;
+    --muted: #7A726C;
+    --rule: #ECE6DF;
+    --paper: #FBF8F4;
+    --card: #FFFFFF;
+    --win: #1E7B3C;
+    --track: #EEE9E3;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    background: var(--red);
+    border-bottom: 6px solid var(--gold);
+    color: #fff;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header .wrap { padding-top: 22px; padding-bottom: 20px; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: end; justify-content: space-between; }
+  .eyebrow { color: var(--gold); font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+  h1 { margin: 2px 0 0; font-size: 28px; font-weight: 800; letter-spacing: -.01em; }
+  .updated { color: #FFE3E8; font-size: 13px; }
+  select {
+    font: inherit; font-size: 13px; color: var(--ink); background: #fff;
+    border: 1px solid #fff; border-radius: 6px; padding: 5px 8px; margin-left: 6px;
+  }
+  main { padding: 28px 16px 48px; }
+  section { margin-top: 32px; }
+  section:first-child { margin-top: 0; }
+  h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 12px; font-weight: 800; }
+  h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); margin-left: 6px; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .kpi { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; border-top: 4px solid var(--red); }
+  .kpi .label { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .kpi .value { font-size: 28px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .kpi .note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .games { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+  .game { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
+  .game.value { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+  .teams { display: flex; justify-content: space-between; font-weight: 700; font-size: 16px; }
+  .teams .pick { color: var(--red); }
+  .bar { display: flex; height: 10px; margin: 10px 0 6px; gap: 2px; }
+  .bar span { border-radius: 4px; }
+  .bar .on { background: var(--red); }
+  .bar .off { background: var(--track); }
+  .probs { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--muted); align-items: center; }
+  .badge { background: var(--gold); color: var(--ink); font-weight: 800; font-size: 12px; border-radius: 4px; padding: 2px 7px; }
+  .badge.final { background: var(--track); color: var(--ink-2); }
+  .empty { background: var(--card); border: 1px dashed var(--rule); border-radius: 10px; padding: 22px; color: var(--muted); text-align: center; }
+
+  .chart-card { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 8px 8px 4px; position: relative; }
+  svg text { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .tip {
+    position: absolute; pointer-events: none; background: var(--ink); color: #fff; font-size: 12px;
+    padding: 6px 9px; border-radius: 6px; white-space: nowrap; opacity: 0; transition: opacity .1s;
+  }
+
+  .table-card { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 2px solid var(--red); white-space: nowrap; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: 0; }
+  .num { text-align: right; }
+  .ok { color: var(--win); font-weight: 800; }
+  .miss { color: var(--red); font-weight: 800; }
+  button.more { margin: 10px auto 0; display: block; font: inherit; font-size: 13px; color: var(--red); background: none; border: 1px solid var(--red); border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+  button.more:hover { background: var(--red-tint); }
+  .runs { font-size: 13px; color: var(--ink-2); }
+  .runs li { padding: 3px 0; }
+  .runs .err { color: var(--red); font-weight: 700; }
+  footer { color: var(--muted); font-size: 12px; padding: 24px 0 40px; border-top: 1px solid var(--rule); }
+
+  @media (max-width: 720px) {
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    h1 { font-size: 24px; }
+    .kpi .value { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">NHL Model</div>
+      <h1 id="title">Daily picks</h1>
+    </div>
+    <div class="updated"><span id="updated">Loading…</span><label id="season-wrap" hidden> · Season<select id="season"></select></label></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <h2 id="today-h">Today</h2>
+    <div id="today" class="games"></div>
+  </section>
+
+  <section>
+    <h2>Season so far</h2>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section>
+    <h2>Pick accuracy over the season <span class="sub">running total, 50% line = coin flip</span></h2>
+    <div class="chart-card" id="chart"><div class="tip" id="tip"></div></div>
+  </section>
+
+  <section>
+    <h2>Results</h2>
+    <div class="table-card"><table id="results"></table></div>
+    <button class="more" id="more" hidden>Show more</button>
+  </section>
+
+  <section>
+    <h2>Recent runs</h2>
+    <ul class="runs" id="runs"></ul>
+  </section>
+</main>
+
+<footer class="wrap">Model output for information only. Not financial advice. Updated daily by GitHub Actions.</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const truthy = (v) => v === true || v === 1 || v === "True" || v === "true";
+const pct = (p, d = 0) => (p == null ? "—" : (p * 100).toFixed(d) + "%");
+const odds = (o) => (o == null ? "—" : o > 0 ? "+" + Math.round(o) : String(Math.round(o)));
+const fmtDate = (iso, opts = { weekday: "short", month: "short", day: "numeric" }) =>
+  new Date(iso + "T12:00:00").toLocaleDateString(undefined, opts);
+const seasonLabel = (s) => `${s.slice(0, 4)}–${s.slice(6, 8)}`;
+
+let DATA, season, shown = 25;
+
+fetch("data.json", { cache: "no-store" })
+  .then((r) => r.json())
+  .then((d) => {
+    DATA = d;
+    const seasons = Object.keys(d.seasons).sort().reverse();
+    season = seasons[0];
+    if (seasons.length > 1) {
+      $("season-wrap").hidden = false;
+      $("season").innerHTML = seasons.map((s) => `<option value="${s}">${seasonLabel(s)}</option>`).join("");
+      $("season").onchange = (e) => { season = e.target.value; shown = 25; render(); };
+    }
+    $("updated").textContent = "Updated " + new Date(d.generated_at).toLocaleString(undefined,
+      { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    render();
+    window.addEventListener("resize", () => drawChart());
+  })
+  .catch(() => { $("updated").textContent = "No data yet — the first daily run will create it."; });
+
+function render() {
+  renderToday();
+  renderKpis();
+  drawChart();
+  renderResults();
+  renderRuns();
+}
+
+function renderToday() {
+  const today = DATA.predictions.filter((p) => p.game_date === DATA.today);
+  $("today-h").innerHTML = `Today <span class="sub">${fmtDate(DATA.today, { weekday: "long", month: "long", day: "numeric" })}</span>`;
+  $("title").textContent = today.length ? `${today.length} game${today.length > 1 ? "s" : ""} today` : "Daily picks";
+  if (!today.length) {
+    $("today").innerHTML = `<div class="empty">No predictions for today yet. They're posted each morning on game days.</div>`;
+    return;
+  }
+  $("today").innerHTML = today.map((p) => {
+    const homePick = p.predicted_winner === p.home_team;
+    const value = truthy(p.is_value_bet);
+    const final = p.actual_home_win != null;
+    const a = p.away_win_prob, h = p.home_win_prob;
+    return `<div class="game${value ? " value" : ""}">
+      <div class="teams"><span class="${homePick ? "" : "pick"}">${esc(p.away_team)}</span>
+        <span style="color:var(--muted);font-weight:500">@</span>
+        <span class="${homePick ? "pick" : ""}">${esc(p.home_team)}</span></div>
+      <div class="bar" role="img" aria-label="${esc(p.away_team)} ${pct(a)}, ${esc(p.home_team)} ${pct(h)}">
+        <span class="${homePick ? "off" : "on"}" style="flex:${a}"></span>
+        <span class="${homePick ? "on" : "off"}" style="flex:${h}"></span></div>
+      <div class="probs"><span>${pct(a)}</span><span>${pct(h)}</span></div>
+      <div class="meta">
+        <span>Pick <strong style="color:var(--ink)">${esc(p.predicted_winner)}</strong></span>
+        ${p.home_odds != null ? `<span>Odds ${odds(p.away_odds)} / ${odds(p.home_odds)}</span>` : ""}
+        ${value ? `<span class="badge">VALUE ${esc(p.value_team)} ${odds(p.value_odds)}</span>` : ""}
+        ${final ? `<span class="badge final">FINAL ${p.away_score}–${p.home_score} ${truthy(p.correct) ? "✓" : "✗"}</span>` : ""}
+      </div></div>`;
+  }).join("");
+}
+
+function renderKpis() {
+  const s = DATA.seasons[season]?.performance;
+  if (!s || !s.resolved) {
+    $("kpis").innerHTML = `<div class="empty" style="grid-column:1/-1">No finished games yet this season.</div>`;
+    return;
+  }
+  const losses = s.resolved - s.correct;
+  const vbL = s.value_bets - s.value_bets_won;
+  const tiles = [
+    ["Picks record", `${s.correct}–${losses}`, `${s.resolved} games`],
+    ["Accuracy", pct(s.accuracy, 1), "picking the winner"],
+    ["Value bets", s.value_bets ? `${s.value_bets_won}–${vbL}` : "—", s.value_bets ? "flat 1-unit stakes" : "needs odds"],
+    ["Value-bet profit", s.value_bets ? `${s.units >= 0 ? "+" : ""}${s.units.toFixed(2)}u` : "—",
+      s.value_bets ? `ROI ${s.roi >= 0 ? "+" : ""}${pct(s.roi, 1)}` : "needs odds"],
+  ];
+  $("kpis").innerHTML = tiles.map(([l, v, n]) =>
+    `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+}
+
+function drawChart() {
+  const box = $("chart");
+  box.querySelector("svg")?.remove();
+  box.querySelector(".empty")?.remove();
+  const series = DATA.seasons[season]?.series || [];
+  if (series.length < 2) {
+    box.insertAdjacentHTML("beforeend", `<div class="empty" style="border:0">The trend appears after two days of results.</div>`);
+    return;
+  }
+  const W = box.clientWidth - 12, H = 240, m = { t: 10, r: 16, b: 26, l: 42 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const vals = series.map((d) => d.cum_accuracy);
+  let lo = Math.min(0.45, ...vals), hi = Math.max(0.65, ...vals);
+  lo = Math.floor(lo * 20) / 20; hi = Math.ceil(hi * 20) / 20;
+  const x = (i) => m.l + (series.length === 1 ? iw / 2 : (i / (series.length - 1)) * iw);
+  const y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * ih;
+  const ticks = [];
+  for (let v = lo; v <= hi + 1e-9; v += 0.05) ticks.push(+v.toFixed(2));
+  const xTicks = [0, Math.floor((series.length - 1) / 2), series.length - 1];
+  const path = series.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d.cum_accuracy).toFixed(1)}`).join("");
+  const svg = `<svg width="${W}" height="${H}" role="img" aria-label="Running pick accuracy by date">
+    ${ticks.map((t) => `<line x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--rule)"/>
+      <text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${Math.round(t * 100)}%</text>`).join("")}
+    <line x1="${m.l}" x2="${W - m.r}" y1="${y(0.5)}" y2="${y(0.5)}" stroke="var(--muted)" stroke-dasharray="4 4"/>
+    ${xTicks.map((i, k) => `<text x="${x(i)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === 2 ? "end" : "middle"}">${fmtDate(series[i].date, { month: "short", day: "numeric" })}</text>`).join("")}
+    <path d="${path}" fill="none" stroke="var(--red)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <line id="xh" y1="${m.t}" y2="${m.t + ih}" stroke="var(--ink-2)" stroke-width="1" opacity="0"/>
+    <circle id="dot" r="5" fill="var(--red)" stroke="#fff" stroke-width="2" opacity="0"/>
+    <rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="hit"/>
+  </svg>`;
+  box.insertAdjacentHTML("beforeend", svg);
+  const hit = box.querySelector("#hit"), xh = box.querySelector("#xh"), dot = box.querySelector("#dot"), tip = $("tip");
+  const show = (evt) => {
+    const r = hit.getBoundingClientRect();
+    const px = (evt.touches ? evt.touches[0].clientX : evt.clientX) - r.left;
+    const i = Math.max(0, Math.min(series.length - 1, Math.round((px / iw) * (series.length - 1))));
+    const d = series[i];
+    xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.setAttribute("opacity", 1);
+    dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(d.cum_accuracy)); dot.setAttribute("opacity", 1);
+    tip.innerHTML = `<strong>${fmtDate(d.date)}</strong><br>${pct(d.cum_accuracy, 1)} over ${d.cum_games} games<br>That day: ${d.correct}/${d.games}`;
+    tip.style.opacity = 1;
+    const left = Math.min(x(i) + 12, W - tip.offsetWidth - 4);
+    tip.style.left = Math.max(4, left) + "px";
+    tip.style.top = Math.max(4, y(d.cum_accuracy) - tip.offsetHeight - 10) + "px";
+  };
+  const hide = () => { xh.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); tip.style.opacity = 0; };
+  hit.addEventListener("mousemove", show); hit.addEventListener("touchstart", show, { passive: true });
+  hit.addEventListener("touchmove", show, { passive: true }); hit.addEventListener("mouseleave", hide);
+}
+
+function renderResults() {
+  const done = DATA.predictions.filter((p) => p.season === season && p.actual_home_win != null);
+  if (!done.length) {
+    $("results").innerHTML = `<tr><td class="empty" style="border:0">Results show up here the morning after each game.</td></tr>`;
+    $("more").hidden = true;
+    return;
+  }
+  const rows = done.slice(0, shown).map((p) => {
+    const prob = p.predicted_winner === p.home_team ? p.home_win_prob : p.away_win_prob;
+    const vb = truthy(p.is_value_bet)
+      ? `${esc(p.value_team)} ${odds(p.value_odds)} <span class="${truthy(p.value_bet_correct) ? "ok" : "miss"}">${truthy(p.value_bet_correct) ? "W" : "L"}</span>` : "";
+    return `<tr><td>${fmtDate(p.game_date)}</td><td>${esc(p.away_team)} @ ${esc(p.home_team)}</td>
+      <td class="num">${p.away_score ?? ""}–${p.home_score ?? ""}</td><td>${esc(p.predicted_winner)}</td>
+      <td class="num">${pct(prob)}</td><td class="${truthy(p.correct) ? "ok" : "miss"}">${truthy(p.correct) ? "✓" : "✗"}</td><td>${vb}</td></tr>`;
+  }).join("");
+  $("results").innerHTML = `<thead><tr><th>Date</th><th>Matchup</th><th class="num">Score</th><th>Pick</th>
+    <th class="num">Prob</th><th></th><th>Value bet</th></tr></thead><tbody>${rows}</tbody>`;
+  $("more").hidden = done.length <= shown;
+  $("more").onclick = () => { shown += 50; renderResults(); };
+}
+
+function renderRuns() {
+  const runs = DATA.runs || [];
+  $("runs").innerHTML = runs.length ? runs.slice(0, 8).map((r) => {
+    const when = new Date(r.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const detail = r.status === "error" ? `<span class="err">failed</span> — ${esc(r.error)}`
+      : r.step === "predict" ? `${r.predicted} game(s)${r.note ? " · " + esc(r.note) : ""}`
+      : r.step === "resolve" ? `${r.resolved} result(s)`
+      : r.step === "retrain" ? `${r.games_trained} games` : esc(r.status);
+    return `<li>${when} · <strong>${esc(r.step)}</strong> · ${detail}</li>`;
+  }).join("") : "<li>No runs yet.</li>";
+}
+</script>
+</body>
+</html>

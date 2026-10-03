@@ -2,11 +2,15 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
+# NHL_DATA_DIR / NHL_MODELS_DIR let the GitHub Actions workflow point these at
+# the checked-out `state` branch so caches and the model persist between runs.
+DATA_DIR = Path(os.getenv("NHL_DATA_DIR", BASE_DIR / "data"))
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 LOGS_DIR = BASE_DIR / "logs"
-MODELS_DIR = BASE_DIR / "models_saved"
+MODELS_DIR = Path(os.getenv("NHL_MODELS_DIR", BASE_DIR / "models_saved"))
+PREDICTIONS_LOG = DATA_DIR / "predictions.csv"
+RUNS_LOG = DATA_DIR / "runs.jsonl"
 
 # NHL API (no key required)
 NHL_API_BASE = "https://api-web.nhle.com/v1"
