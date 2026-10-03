@@ -12,6 +12,20 @@ permissions:
   contents: read
 
 jobs:
+  # Separate job so its log is readable within a minute, before the backtest ends.
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe live data sources
+        run: python scripts/probe_sources.py
+
   backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 300
@@ -22,10 +36,6 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-
-      - name: Probe live data sources
-        continue-on-error: true
-        run: python scripts/probe_sources.py
 
       # Boxscore cache: the first run downloads ~9,000 boxscores (~1 hour).
       # Saved even if the backtest fails so the download isn't repeated.
