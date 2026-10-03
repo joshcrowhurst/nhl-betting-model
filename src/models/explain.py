@@ -73,7 +73,7 @@ def _sentence(group: str, f: pd.Series, home: str, away: str, favoured: str, g: 
         if p is None:
             return None
         p = p if fav_home else 1 - p
-        if p <= 0.5:
+        if p < 0.55:  # too small an edge to be worth a sentence
             return None
         return f"Over the longer run {favoured} has been the stronger team (rating edge alone makes them {p:.0%})."
     if group == "starter":
@@ -146,13 +146,10 @@ def _sentence(group: str, f: pd.Series, home: str, away: str, favoured: str, g: 
             return None
         return f"{favoured} has won {r:.0%} of recent meetings between these teams."
     if group == "faceoffs":
-        h, a = val("home_faceoff_pct_l10"), val("away_faceoff_pct_l10")
-        if h is None or a is None:
-            return None
-        fv, ov = (h, a) if fav_home else (a, h)
-        if fv <= ov:
-            return None
-        return f"{favoured} has been winning more faceoffs ({fv:.0%} vs {ov:.0%})."
+        # The faceoff feature averages per-skater faceoff % including players
+        # who took none, so its values (~18%) aren't real faceoff win rates
+        # and shouldn't be quoted. Skip it until the feature is rebuilt.
+        return None
     if group == "rest":
         hb, ab = val("home_is_b2b"), val("away_is_b2b")
         if (ab if fav_home else hb):
@@ -160,7 +157,8 @@ def _sentence(group: str, f: pd.Series, home: str, away: str, favoured: str, g: 
         rest = val("rest_advantage")
         if rest:
             r = rest if fav_home else -rest
-            if r > 0:
+            # Skip big gaps: early in the season they're just offseason time.
+            if 0 < r <= 3:
                 return f"{favoured} is better rested ({int(r)} more day{'s' if r > 1 else ''} off)."
         g7 = val("away_games_last_7_days")
         if g7 and g7 >= 4:
