@@ -48,7 +48,11 @@ def get_enriched_game_stats(schedule_df: pd.DataFrame, season: str, delay: float
     # Load existing cache
     if cache_path.exists():
         cached = pd.read_parquet(cache_path)
-        already_fetched = set(cached["game_id"].tolist())
+        if "home_goalie_id" not in cached.columns:
+            # Cache predates starting-goalie IDs; refetch the season once.
+            logger.info(f"Season {season}: cache lacks goalie IDs, refetching")
+            cached = pd.DataFrame()
+        already_fetched = set(cached["game_id"].tolist()) if not cached.empty else set()
     else:
         cached = pd.DataFrame()
         already_fetched = set()
@@ -101,6 +105,8 @@ def _fetch_boxscore_stats(game_id: int) -> dict | None:
         goalies = pbg.get(side, {}).get("goalies", [])
         starter = next((g for g in goalies if g.get("starter")), None)
         if starter:
+            row[f"{key}_goalie_id"] = starter.get("playerId")
+            row[f"{key}_goalie_name"] = (starter.get("name") or {}).get("default")
             row[f"{key}_goalie_sv_pct"] = starter.get("savePctg")
             row[f"{key}_goalie_saves"] = starter.get("saves")
             row[f"{key}_goalie_sa"] = starter.get("shotsAgainst")
@@ -109,7 +115,7 @@ def _fetch_boxscore_stats(game_id: int) -> dict | None:
             # PP from goalie data
             _parse_pp_shots(starter, key, row)
         else:
-            for col in ["goalie_sv_pct", "goalie_saves", "goalie_sa", "goalie_ga", "goalie_toi", "pp_shots_against"]:
+            for col in ["goalie_id", "goalie_name", "goalie_sv_pct", "goalie_saves", "goalie_sa", "goalie_ga", "goalie_toi", "pp_shots_against"]:
                 row[f"{key}_{col}"] = None
 
     # Skater aggregates: hits, blocked shots, faceoff %, giveaways, takeaways, PP goals

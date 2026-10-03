@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import BACKTEST_START_SEASON, WALK_FORWARD_RETRAIN_FREQ
-from src.features.feature_engineer import build_features, get_feature_cols
+from src.features.feature_engineer import build_features, get_feature_cols, OPTIONAL_FEATURE_PREFIXES
 from src.models.moneyline_model import MoneylineModel, _score
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,8 @@ class BacktestConfig:
     min_train_games: int = 500        # minimum games before first model fit
     retrain_every: int = WALK_FORWARD_RETRAIN_FREQ  # retrain after N test games
     include_market: bool = False       # include market odds feature
+    feature_cols: list = None          # override the default feature list
+    params: dict = None                # override XGBoost params
 
 
 @dataclass
@@ -55,15 +57,13 @@ def run_backtest(
     if config is None:
         config = BacktestConfig()
 
-    feature_cols = get_feature_cols(include_market=config.include_market)
+    feature_cols = config.feature_cols or get_feature_cols(include_market=config.include_market)
     features_df = features_df.copy().sort_values("date").reset_index(drop=True)
     start_dt = pd.Timestamp(config.start_date)
 
     # Only require base features to be non-null — XGBoost handles NaN for optional ones
     base_cols = [c for c in feature_cols if c in features_df.columns
-                 and not c.startswith(("home_goalie", "away_goalie", "goalie_", "home_shot", "away_shot",
-                                       "shot_ratio", "home_faceoff", "away_faceoff",
-                                       "home_hits", "away_hits", "market_"))]
+                 and not c.startswith(OPTIONAL_FEATURE_PREFIXES)]
     train_mask = (features_df["date"] < start_dt) & features_df[base_cols].notna().all(axis=1)
     if train_mask.sum() < config.min_train_games:
         raise ValueError(
@@ -88,7 +88,8 @@ def run_backtest(
                 features_df[base_cols].notna().all(axis=1)
             ]
             if len(train_data) >= config.min_train_games:
-                current_model = MoneylineModel(include_market=config.include_market)
+                current_model = MoneylineModel(params=config.params, include_market=config.include_market,
+                                               feature_cols=feature_cols)
                 current_model.train(train_data, train_data["home_win"], calibrate=True)
                 games_since_retrain = 0
                 logger.debug(f"Retrained on {len(train_data)} games up to {row['date'].date()}")

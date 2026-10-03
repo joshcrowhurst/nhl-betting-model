@@ -149,7 +149,10 @@ def match_odds_to_games(consensus: pd.DataFrame, games: pd.DataFrame) -> pd.Data
         return games
 
     odds = consensus.copy()
-    odds["date"] = pd.to_datetime(odds["commence_time"]).dt.tz_convert("UTC").dt.normalize().dt.tz_localize(None)
+    # Match on the Eastern-time date: NHL schedule dates are local, and a 10 PM ET
+    # puck drop is already the next day in UTC.
+    odds["date"] = (pd.to_datetime(odds["commence_time"], utc=True)
+                    .dt.tz_convert("America/New_York").dt.normalize().dt.tz_localize(None))
     # Drop full-name columns before renaming abbrevs to home_team/away_team
     odds = odds.drop(columns=["home_team", "away_team"], errors="ignore")
     odds = odds.rename(columns={

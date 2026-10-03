@@ -7,6 +7,8 @@ Usage examples:
   python run.py resolve               # fill in yesterday's results
   python run.py summary               # show forward test P&L
   python run.py fetch --seasons 3     # just fetch/cache data
+  python run.py daily                 # resolve + predict + email (what GitHub Actions runs)
+  python run.py site --out _site      # build the static dashboard
 """
 
 import argparse
@@ -159,15 +161,11 @@ def cmd_importance(args) -> None:
     enriched = fetch_enriched(df, seasons, skip_enrichment=args.skip_enrichment)
     features = build_features(df, enriched=enriched)
 
-    from src.features.feature_engineer import get_feature_cols
+    from src.features.feature_engineer import get_feature_cols, OPTIONAL_FEATURE_PREFIXES
     feat_cols = get_feature_cols(include_market=False)
     valid = features.dropna(subset=["home_win"])
     # Don't drop rows with NaN optional features — XGBoost handles them
-    valid = valid.dropna(subset=[c for c in feat_cols
-                                  if not c.startswith(("home_goalie", "away_goalie", "goalie_",
-                                                       "home_shot", "away_shot", "shot_ratio",
-                                                       "home_faceoff", "away_faceoff",
-                                                       "home_hits", "away_hits", "market_"))])
+    valid = valid.dropna(subset=[c for c in feat_cols if not c.startswith(OPTIONAL_FEATURE_PREFIXES)])
 
     logger.info(f"Training on {len(valid)} games for importance analysis...")
     model = MoneylineModel(include_market=False)
@@ -219,6 +217,80 @@ def cmd_train_and_save(args) -> None:
     print(f"Model saved to {path}")
 
 
+def cmd_compare_goalie(args) -> None:
+    """Walk-forward backtest with vs without the starting-goalie features."""
+    import json
+    import os
+    import pandas as pd
+    from src.features.feature_engineer import get_feature_cols
+    from src.models.moneyline_model import _score
+
+    df, seasons = fetch_data(num_seasons=args.seasons)
+    enriched = fetch_enriched(df, seasons)
+    logger.info("Building features...")
+    features = build_features(df, enriched=enriched)
+
+    from src.features.feature_engineer import STARTER_FEATURE_COLS
+    from src.models.moneyline_model import PREVIOUS_PARAMS
+    base = get_feature_cols(include_market=False)
+    variants = {
+        "current model": (base, None),
+        "current + starting goalie": (base + STARTER_FEATURE_COLS, None),
+        "previous (deeper) model": (base, PREVIOUS_PARAMS),
+    }
+
+    test = features[features["date"] >= pd.Timestamp(args.start_date)]
+    backup = test[(test["home_starter_share_l10"] < 0.5) | (test["away_starter_share_l10"] < 0.5)]["game_id"]
+    coverage = test["starter_sv_pct_diff"].notna().mean()
+
+    results = {}
+    for name, (cols, params) in variants.items():
+        logger.info(f"Backtesting: {name} ({len(cols)} features)")
+        res = run_backtest(features, BacktestConfig(start_date=args.start_date, retrain_every=args.retrain_every,
+                                                    feature_cols=cols, params=params))
+        preds = res.predictions
+        sub = preds[preds["game_id"].isin(backup)]
+        results[name] = {
+            "all": {**res.overall_metrics},
+            "backup_starts": _score(sub["actual_home_win"], sub["home_win_prob"], label="backup") if len(sub) > 50 else None,
+            "by_season": {s: _score(g["actual_home_win"], g["home_win_prob"], label=s)
+                          for s, g in preds.groupby("season")},
+        }
+
+    lines = [f"## Starting-goalie backtest", "",
+             f"Test period from {args.start_date}: {len(test)} games; starter feature available for {coverage:.0%}; "
+             f"{len(backup)} games with a backup (starter share < 50%) in net.", "",
+             "| Model | Games | Log loss ↓ | Brier ↓ | AUC ↑ | Accuracy ↑ |", "|---|---|---|---|---|---|"]
+    for scope in ("all", "backup_starts"):
+        for name, r in results.items():
+            m = r[scope]
+            if m:
+                lines.append(f"| {name}{' — backup games' if scope != 'all' else ''} | {m['n']} | {m['log_loss']:.4f} | "
+                             f"{m['brier']:.4f} | {m['auc']:.4f} | {m['accuracy']:.3f} |")
+    lines += ["", "### By season (log loss)", "", "| Season | " + " | ".join(results) + " |",
+              "|---|" + "---|" * len(results)]
+    for season in sorted(next(iter(results.values()))["by_season"]):
+        lines.append(f"| {season} | " + " | ".join(f"{r['by_season'][season]['log_loss']:.4f}"
+                                                   for r in results.values()) + " |")
+    report = "\n".join(lines)
+    print(report)
+    print(json.dumps(results, indent=1, default=str))
+    if os.getenv("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write(report + "\n")
+
+
+def cmd_daily(args) -> None:
+    from src.pipeline.daily import run
+    tasks = {t.strip() for t in args.tasks.split(",") if t.strip()}
+    run(tasks, send_email=not args.no_email, force_email=args.force_email)
+
+
+def cmd_site(args) -> None:
+    from src.pipeline.site import build
+    print(f"Site built in {build(Path(args.out))}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NHL Betting Model")
     sub = parser.add_subparsers(dest="command")
@@ -251,6 +323,22 @@ if __name__ == "__main__":
     p_fetch = sub.add_parser("fetch", help="Fetch and cache NHL data")
     p_fetch.add_argument("--seasons", type=int, default=5)
     p_fetch.set_defaults(func=lambda a: fetch_data(a.seasons))
+
+    p_cmp = sub.add_parser("compare-goalie", help="Backtest with vs without starting-goalie features")
+    p_cmp.add_argument("--seasons", type=int, default=7)
+    p_cmp.add_argument("--start-date", default="2023-10-01")
+    p_cmp.add_argument("--retrain-every", type=int, default=100)
+    p_cmp.set_defaults(func=cmd_compare_goalie)
+
+    p_daily = sub.add_parser("daily", help="Scheduled pipeline: resolve, retrain, predict, email")
+    p_daily.add_argument("--tasks", default="resolve,predict", help="Comma list of resolve,retrain,predict")
+    p_daily.add_argument("--no-email", action="store_true")
+    p_daily.add_argument("--force-email", action="store_true", help="Email today's picks even if none are new")
+    p_daily.set_defaults(func=cmd_daily)
+
+    p_site = sub.add_parser("site", help="Build the static dashboard")
+    p_site.add_argument("--out", default="_site")
+    p_site.set_defaults(func=cmd_site)
 
     args = parser.parse_args()
     if args.command is None:
