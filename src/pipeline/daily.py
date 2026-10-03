@@ -20,7 +20,7 @@ from src.data.nhl_api import get_multiple_seasons, season_range, current_season_
 from src.data.boxscore_enricher import get_enriched_game_stats
 from src.data.odds_api import get_current_odds, get_consensus_odds, match_odds_to_games, compute_ev
 from src.data.starting_goalies import get_starters
-from src.features.feature_engineer import build_features, get_feature_cols, OPTIONAL_FEATURE_PREFIXES
+from src.features.feature_engineer import build_features, get_feature_cols, OPTIONAL_FEATURE_PREFIXES, FEATURE_VERSION
 from src.features.goalie_features import GoalieHistory
 from src.models.moneyline_model import MoneylineModel
 from src.models.explain import contributions, rationale
@@ -88,7 +88,8 @@ def load_or_train_model() -> MoneylineModel:
     if MODEL_PATH.exists():
         try:
             model = MoneylineModel.load(MODEL_PATH)
-            if model.feature_cols == get_feature_cols(include_market=False):
+            if (model.feature_cols == get_feature_cols(include_market=False)
+                    and getattr(model, "feature_version", 1) == FEATURE_VERSION):
                 return model
             logger.info("Saved model was trained on a different feature set; retraining")
         except Exception as e:  # e.g. pickle from an incompatible library version
