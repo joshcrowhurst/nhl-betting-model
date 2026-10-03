@@ -44,3 +44,19 @@ try:
     show("Boxscore home goalies", box.get("playerByGameStats", {}).get("homeTeam", {}).get("goalies"))
 except Exception as e:
     show("Boxscore ERROR", repr(e))
+
+# Team faceoff sources (the boxscore only has per-skater faceoff %).
+GID = 2025021000
+try:
+    rr = requests.get(f"https://api-web.nhle.com/v1/gamecenter/{GID}/right-rail", timeout=15).json()
+    show("Right-rail keys", list(rr.keys()))
+    show("Right-rail teamGameStats", rr.get("teamGameStats"))
+except Exception as e:
+    show("Right-rail ERROR", repr(e))
+try:
+    pbp = requests.get(f"https://api-web.nhle.com/v1/gamecenter/{GID}/play-by-play", timeout=15).json()
+    fo = [p for p in pbp.get("plays", []) if p.get("typeDescKey") == "faceoff"]
+    show("PBP teams", {"home": pbp.get("homeTeam", {}).get("id"), "away": pbp.get("awayTeam", {}).get("id")})
+    show(f"PBP faceoffs: {len(fo)}; first", fo[0] if fo else None)
+except Exception as e:
+    show("PBP ERROR", repr(e))

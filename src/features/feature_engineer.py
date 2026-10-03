@@ -82,6 +82,11 @@ FEATURE_COLS = [
 ]
 
 
+# Bump when a feature's meaning or scale changes, so saved models trained on
+# the old values are retrained instead of being fed incompatible inputs.
+# 2: faceoff % is now the real team value (was an average of per-skater %).
+FEATURE_VERSION = 2
+
 # Starting-goalie features: built by build_features and shown in the
 # explanations' source data, but left out of the model (see FEATURE_COLS).
 STARTER_FEATURE_COLS = ["starter_sv_pct_diff", "home_starter_share_l10", "away_starter_share_l10"]

@@ -280,6 +280,52 @@ def cmd_compare_goalie(args) -> None:
             f.write(report + "\n")
 
 
+def cmd_compare_faceoff(args) -> None:
+    """Walk-forward backtest: real team faceoff % vs the old skater average vs none."""
+    import os
+    import pandas as pd
+    from src.features.feature_engineer import get_feature_cols
+
+    df, seasons = fetch_data(num_seasons=args.seasons)
+    enriched = fetch_enriched(df, seasons)
+    old = enriched.copy()
+    for side in ("home", "away"):
+        old[f"{side}_faceoff_pct"] = old[f"{side}_faceoff_pct_skater_avg"]
+
+    logger.info("Building features (real team faceoff %)...")
+    feats_new = build_features(df, enriched=enriched)
+    logger.info("Building features (old skater-average faceoff %)...")
+    feats_old = build_features(df, enriched=old)
+
+    base = get_feature_cols(include_market=False)
+    no_fo = [c for c in base if "faceoff" not in c]
+    variants = {
+        "real team faceoff %": (feats_new, base),
+        "old skater-average faceoff %": (feats_old, base),
+        "no faceoff features": (feats_new, no_fo),
+    }
+    test = feats_new[feats_new["date"] >= pd.Timestamp(args.start_date)]
+    sample = test[["home_faceoff_pct_l10", "away_faceoff_pct_l10"]].describe().round(3)
+    sample_old = feats_old.loc[test.index, ["home_faceoff_pct_l10"]].describe().round(3)
+
+    lines = ["## Faceoff backtest", "",
+             f"Test period from {args.start_date}: {len(test)} games. "
+             f"Real home faceoff % (last 10): mean {sample.loc['mean', 'home_faceoff_pct_l10']}, "
+             f"sd {sample.loc['std', 'home_faceoff_pct_l10']}. "
+             f"Old skater average: mean {sample_old.loc['mean', 'home_faceoff_pct_l10']}.", "",
+             "| Model | Games | Log loss ↓ | Brier ↓ | AUC ↑ | Accuracy ↑ |", "|---|---|---|---|---|---|"]
+    for name, (feats, cols) in variants.items():
+        logger.info(f"Backtesting: {name}")
+        m = run_backtest(feats, BacktestConfig(start_date=args.start_date, retrain_every=args.retrain_every,
+                                               feature_cols=cols)).overall_metrics
+        lines.append(f"| {name} | {m['n']} | {m['log_loss']:.4f} | {m['brier']:.4f} | {m['auc']:.4f} | {m['accuracy']:.3f} |")
+    report = "\n".join(lines)
+    print(report)
+    if os.getenv("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write(report + "\n")
+
+
 def cmd_daily(args) -> None:
     from src.pipeline.daily import run
     tasks = {t.strip() for t in args.tasks.split(",") if t.strip()}
@@ -329,6 +375,12 @@ if __name__ == "__main__":
     p_cmp.add_argument("--start-date", default="2023-10-01")
     p_cmp.add_argument("--retrain-every", type=int, default=100)
     p_cmp.set_defaults(func=cmd_compare_goalie)
+
+    p_fo = sub.add_parser("compare-faceoff", help="Backtest real team faceoff % vs the old skater average")
+    p_fo.add_argument("--seasons", type=int, default=7)
+    p_fo.add_argument("--start-date", default="2023-10-01")
+    p_fo.add_argument("--retrain-every", type=int, default=100)
+    p_fo.set_defaults(func=cmd_compare_faceoff)
 
     p_daily = sub.add_parser("daily", help="Scheduled pipeline: resolve, retrain, predict, email")
     p_daily.add_argument("--tasks", default="resolve,predict", help="Comma list of resolve,retrain,predict")

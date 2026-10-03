@@ -34,10 +34,58 @@ BATCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_enriched_game_stats(schedule_df: pd.DataFrame, season: str, delay: float = 0.15) -> pd.DataFrame:
     """
-    Given a schedule DataFrame for one season, fetches boxscores for all completed
-    games and returns a DataFrame of per-game team stats.
+    Per-game team stats for a season's completed games: boxscore stats plus
+    real team faceoff win % from the gamecenter right-rail endpoint.
 
-    Caches the entire season to one parquet file — only fetches missing games.
+    The boxscore only has per-skater faceoff %, and averaging those (including
+    players who took no faceoffs) gave meaningless ~18% values. That average
+    is kept as {home,away}_faceoff_pct_skater_avg for comparison; the
+    {home,away}_faceoff_pct columns are the real team values.
+    """
+    box = _get_boxscore_stats(schedule_df, season, delay)
+    if box.empty:
+        return box
+    box = box.rename(columns={"home_faceoff_pct": "home_faceoff_pct_skater_avg",
+                              "away_faceoff_pct": "away_faceoff_pct_skater_avg"})
+    fo = get_team_faceoffs(box["game_id"].tolist(), season, delay)
+    return box.merge(fo, on="game_id", how="left") if not fo.empty else box.assign(
+        home_faceoff_pct=float("nan"), away_faceoff_pct=float("nan"))
+
+
+def get_team_faceoffs(game_ids: list, season: str, delay: float = 0.15) -> pd.DataFrame:
+    """Team faceoff win % per game (cached per season; only fetches missing games)."""
+    cache_path = BATCH_CACHE_DIR / f"faceoffs_{season}.parquet"
+    cached = pd.read_parquet(cache_path) if cache_path.exists() else pd.DataFrame(
+        columns=["game_id", "home_faceoff_pct", "away_faceoff_pct"])
+    have = set(cached["game_id"].tolist())
+    missing = [g for g in game_ids if g not in have]
+    if missing:
+        logger.info(f"Season {season}: fetching team faceoffs for {len(missing)} games")
+    rows = []
+    for i, game_id in enumerate(missing):
+        try:
+            resp = SESSION.get(f"{NHL_API_BASE}/gamecenter/{game_id}/right-rail", timeout=15)
+            resp.raise_for_status()
+            stats = {s.get("category"): s for s in resp.json().get("teamGameStats", [])}
+            fo = stats.get("faceoffWinningPctg")
+            if fo:
+                rows.append({"game_id": game_id, "home_faceoff_pct": fo.get("homeValue"),
+                             "away_faceoff_pct": fo.get("awayValue")})
+        except Exception as e:
+            logger.debug(f"Right-rail fetch failed for {game_id}: {e}")
+        if (i + 1) % 200 == 0:
+            logger.info(f"  Fetched faceoffs {i+1}/{len(missing)}...")
+        time.sleep(delay)
+    if rows:
+        cached = pd.concat([cached, pd.DataFrame(rows)], ignore_index=True) if not cached.empty else pd.DataFrame(rows)
+        cached.to_parquet(cache_path, index=False)
+    return cached
+
+
+def _get_boxscore_stats(schedule_df: pd.DataFrame, season: str, delay: float = 0.15) -> pd.DataFrame:
+    """
+    Fetches boxscores for all completed games in a season and returns per-game
+    team stats. Caches the season to one parquet file — only fetches missing games.
     """
     cache_path = BATCH_CACHE_DIR / f"enriched_{season}.parquet"
 

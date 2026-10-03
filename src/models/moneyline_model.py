@@ -24,7 +24,7 @@ from xgboost import XGBClassifier
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import MODELS_DIR
-from src.features.feature_engineer import get_feature_cols
+from src.features.feature_engineer import get_feature_cols, FEATURE_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ class MoneylineModel:
         self.params = {**DEFAULT_PARAMS, **(params or {})}
         self.include_market = include_market
         self.feature_cols = list(feature_cols) if feature_cols else get_feature_cols(include_market=include_market)
+        self.feature_version = FEATURE_VERSION
         self._model = None
         self.train_metrics = {}
 
