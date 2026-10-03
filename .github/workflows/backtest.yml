@@ -1,0 +1,45 @@
+name: Backtest
+
+# Runs on pushes to feature branches that touch the model, so changes are
+# checked against real NHL data before they're merged.
+on:
+  push:
+    branches: ["claude/**"]
+    paths: ["src/**", "run.py", ".github/workflows/backtest.yml", "scripts/probe_sources.py"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Probe live data sources
+        continue-on-error: true
+        run: python scripts/probe_sources.py
+
+      # Boxscore cache: the first run downloads ~9,000 boxscores (~1 hour).
+      # Saved even if the backtest fails so the download isn't repeated.
+      - uses: actions/cache/restore@v4
+        with:
+          path: data/raw
+          key: nhl-raw-${{ github.run_id }}
+          restore-keys: nhl-raw-
+
+      - name: Backtest with vs without starting goalie
+        run: python run.py compare-goalie
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/raw
+          key: nhl-raw-${{ github.run_id }}

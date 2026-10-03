@@ -10,9 +10,18 @@ It costs nothing to run.
 
 | When (ET, approx.) | What |
 |---|---|
-| ~10:15 AM daily | Record last night's results, predict today's games, email the picks |
-| ~1:45 PM daily | Catch-up run in case the morning run started late or failed. It only predicts games not yet predicted, so you won't get a duplicate email |
+| ~11:45 AM daily | Record last night's results, predict today's games, email the picks |
+| ~2:15 PM daily | Catch-up run in case the morning run started late or failed. It only predicts games not yet predicted, so you won't get a duplicate email |
 | ~4:30 AM Mondays | Retrain the model on the last 6 seasons |
+
+Every pick shows the starting goalies and a two- or three-sentence explanation.
+- **Starting goalies:** taken from [Daily Faceoff](https://www.dailyfaceoff.com/starting-goalies)
+  when it lists them (confirmed or likely). Otherwise the team's usual starter
+  is used, shown as *projected*. The model rates each starter on his own recent
+  save % and whether he's the team's regular starter.
+- **Explanations:** built from the model's own per-feature contributions
+  (XGBoost SHAP values), so they show what actually drove each probability.
+  No external service is involved.
 
 Every run also rebuilds the dashboard. The pipeline keeps its state on the
 `state` branch: cached NHL data, the trained model, `predictions.csv` and
@@ -46,6 +55,7 @@ python run.py daily --no-email          # resolve + predict into ./data
 python run.py site --out _site          # build the dashboard
 cd _site && python -m http.server       # view it at http://localhost:8000
 python run.py backtest                  # walk-forward backtest
+python run.py compare-goalie            # backtest with vs without starting-goalie features
 ```
 
 ## Shutting down the old Google Cloud setup
@@ -70,3 +80,10 @@ done
 
 If you used the old Firebase Hosting site, run `firebase hosting:disable` to
 take it down.
+
+## Backtests on GitHub
+
+`.github/workflows/backtest.yml` runs on pushes to `claude/**` branches that
+touch the model. It backtests with and without the starting-goalie features on
+real NHL data and posts a results table in the run summary. It also logs what
+the live data sources currently return, so the parsers can be checked.

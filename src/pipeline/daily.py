@@ -19,8 +19,11 @@ from config import MODELS_DIR, ODDS_API_KEY
 from src.data.nhl_api import get_multiple_seasons, season_range, current_season_code, get_games_for_date
 from src.data.boxscore_enricher import get_enriched_game_stats
 from src.data.odds_api import get_current_odds, get_consensus_odds, match_odds_to_games, compute_ev
-from src.features.feature_engineer import build_features, get_feature_cols
+from src.data.starting_goalies import get_starters
+from src.features.feature_engineer import build_features, get_feature_cols, OPTIONAL_FEATURE_PREFIXES
+from src.features.goalie_features import GoalieHistory
 from src.models.moneyline_model import MoneylineModel
+from src.models.explain import contributions, rationale
 from src.pipeline import store
 
 logger = logging.getLogger(__name__)
@@ -33,11 +36,6 @@ RESOLVE_LOOKBACK_DAYS = 14
 NOT_STARTED = {"FUT", "PRE"}
 FINISHED = {"OFF", "FINAL"}
 
-# Optional boxscore features that may be missing; XGBoost handles their NaNs.
-OPTIONAL_PREFIXES = (
-    "home_goalie", "away_goalie", "goalie_", "home_shot", "away_shot", "shot_ratio",
-    "home_faceoff", "away_faceoff", "home_hits", "away_hits", "market_",
-)
 
 
 def today_et() -> date:
@@ -75,7 +73,7 @@ def _load_history(num_seasons: int) -> tuple[pd.DataFrame, pd.DataFrame | None]:
 def retrain() -> MoneylineModel:
     games, enriched = _load_history(TRAIN_SEASONS)
     features = build_features(games, enriched=enriched)
-    base_cols = [c for c in get_feature_cols(include_market=False) if not c.startswith(OPTIONAL_PREFIXES)]
+    base_cols = [c for c in get_feature_cols(include_market=False) if not c.startswith(OPTIONAL_FEATURE_PREFIXES)]
     valid = features.dropna(subset=["home_win"]).dropna(subset=base_cols)
 
     model = MoneylineModel(include_market=False)
@@ -89,7 +87,10 @@ def retrain() -> MoneylineModel:
 def load_or_train_model() -> MoneylineModel:
     if MODEL_PATH.exists():
         try:
-            return MoneylineModel.load(MODEL_PATH)
+            model = MoneylineModel.load(MODEL_PATH)
+            if model.feature_cols == get_feature_cols(include_market=False):
+                return model
+            logger.info("Saved model was trained on a different feature set; retraining")
         except Exception as e:  # e.g. pickle from an incompatible library version
             logger.warning(f"Saved model unusable ({e}); retraining")
     return retrain()
@@ -177,12 +178,24 @@ def predict(model: MoneylineModel, game_date: date | None = None) -> pd.DataFram
     games, enriched = _load_history(HISTORY_SEASONS)
     day_ts = pd.Timestamp(game_date)
     prior = games[games["date"] < day_ts]
+
+    # Tonight's starters (Daily Faceoff, else each team's usual starter)
+    prior_box = prior.merge(enriched, on="game_id", how="left") if enriched is not None else prior
+    names = {}
+    for side in ("home", "away"):
+        if f"{side}_goalie_id" in prior_box.columns:
+            pairs = prior_box[[f"{side}_goalie_id", f"{side}_goalie_name"]].dropna()
+            names.update(dict(zip(pairs.iloc[:, 0].astype("int64"), pairs.iloc[:, 1])))
+    starters = get_starters(game_date, targets, GoalieHistory(prior_box), names)
+    targets = targets.merge(starters, on="game_id", how="left")
     combined = pd.concat([prior, targets.assign(home_win=0.0)], ignore_index=True)
     features = build_features(combined, enriched=enriched, target_ids=targets["game_id"])
 
     consensus = _fetch_odds()
     if consensus is not None and not consensus.empty:
         targets = match_odds_to_games(consensus, targets.assign(date=day_ts))
+
+    contribs = contributions(model, features) if not features.empty else None
 
     rows = []
     for _, game in targets.iterrows():
@@ -191,6 +204,15 @@ def predict(model: MoneylineModel, game_date: date | None = None) -> pd.DataFram
             logger.warning(f"Skipping {game['game_id']} — not enough history")
             continue
         p_home = float(model.predict_proba(feat)[0])
+        favoured = game["home_team"] if p_home > 0.5 else game["away_team"]
+        try:
+            names = {side: game.get(f"{side}_starter_name") for side in ("home", "away")
+                     if isinstance(game.get(f"{side}_starter_name"), str)}
+            why = rationale(feat.iloc[0], contribs.loc[feat.index[0]], game["home_team"], game["away_team"],
+                            favoured, names)
+        except Exception as e:  # an explanation must never block a prediction
+            logger.warning(f"Rationale failed for {game['game_id']}: {e}")
+            why = None
         home_odds, away_odds = _sf(game.get("home_odds")), _sf(game.get("away_odds"))
         home_ev = compute_ev(p_home, home_odds) if home_odds else None
         away_ev = compute_ev(1 - p_home, away_odds) if away_odds else None
@@ -210,12 +232,15 @@ def predict(model: MoneylineModel, game_date: date | None = None) -> pd.DataFram
             "away_team": game["away_team"],
             "home_win_prob": round(p_home, 4),
             "away_win_prob": round(1 - p_home, 4),
-            "predicted_winner": game["home_team"] if p_home > 0.5 else game["away_team"],
+            "predicted_winner": favoured,
+            "rationale": why,
             "market_home_prob": _sf(game.get("market_home_prob")),
             "home_odds": home_odds,
             "away_odds": away_odds,
             "home_ev": home_ev,
             "away_ev": away_ev,
+            **{f"{side}_starter{suffix}": game.get(f"{side}_starter{suffix}")
+               for side in ("home", "away") for suffix in ("_name", "_status")},
             "is_value_bet": value_team is not None,
             "value_team": value_team,
             "value_odds": value_odds,

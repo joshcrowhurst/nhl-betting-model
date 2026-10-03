@@ -37,7 +37,6 @@ DEFAULT_PARAMS = {
     "min_child_weight": 3,
     "gamma": 0.1,
     "reg_lambda": 1.5,
-    "use_label_encoder": False,
     "eval_metric": "logloss",
     "random_state": 42,
     "n_jobs": -1,
@@ -45,14 +44,14 @@ DEFAULT_PARAMS = {
 
 
 class MoneylineModel:
-    def __init__(self, params: dict = None, include_market: bool = False):
+    def __init__(self, params: dict = None, include_market: bool = False, feature_cols: list[str] = None):
         """
         include_market: if True, uses market implied prob as a feature.
         Set False for pure model, True to blend with market.
         """
         self.params = {**DEFAULT_PARAMS, **(params or {})}
         self.include_market = include_market
-        self.feature_cols = get_feature_cols(include_market=include_market)
+        self.feature_cols = list(feature_cols) if feature_cols else get_feature_cols(include_market=include_market)
         self._model = None
         self.train_metrics = {}
 

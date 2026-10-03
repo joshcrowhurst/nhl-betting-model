@@ -67,6 +67,10 @@
   .bar .on { background: var(--red); }
   .bar .off { background: var(--track); }
   .probs { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .goalies { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+  .goalies .st { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .goalies .st.conf { color: var(--win); font-weight: 700; }
+  .why { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
   .meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--muted); align-items: center; }
   .badge { background: var(--gold); color: var(--ink); font-weight: 800; font-size: 12px; border-radius: 4px; padding: 2px 7px; }
   .badge.final { background: var(--track); color: var(--ink-2); }
@@ -146,7 +150,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const truthy = (v) => v === true || v === 1 || v === "True" || v === "true";
-const pct = (p, d = 0) => (p == null ? "—" : (p * 100).toFixed(d) + "%");
+const pct = (p, d = 0) => (p == null ? "—" : p >= 0.995 && !d ? ">99%" : p < 0.005 && !d ? "<1%" : (p * 100).toFixed(d) + "%");
 const odds = (o) => (o == null ? "—" : o > 0 ? "+" + Math.round(o) : String(Math.round(o)));
 const fmtDate = (iso, opts = { weekday: "short", month: "short", day: "numeric" }) =>
   new Date(iso + "T12:00:00").toLocaleDateString(undefined, opts);
@@ -201,6 +205,9 @@ function renderToday() {
         <span class="${homePick ? "off" : "on"}" style="flex:${a}"></span>
         <span class="${homePick ? "on" : "off"}" style="flex:${h}"></span></div>
       <div class="probs"><span>${pct(a)}</span><span>${pct(h)}</span></div>
+      ${p.home_starter_name || p.away_starter_name ? `<div class="goalies">
+        <span>${goalie(p, "away")}</span><span>${goalie(p, "home")}</span></div>` : ""}
+      ${p.rationale ? `<p class="why">${esc(p.rationale)}</p>` : ""}
       <div class="meta">
         <span>Pick <strong style="color:var(--ink)">${esc(p.predicted_winner)}</strong></span>
         ${p.home_odds != null ? `<span>Odds ${odds(p.away_odds)} / ${odds(p.home_odds)}</span>` : ""}
@@ -208,6 +215,14 @@ function renderToday() {
         ${final ? `<span class="badge final">FINAL ${p.away_score}–${p.home_score} ${truthy(p.correct) ? "✓" : "✗"}</span>` : ""}
       </div></div>`;
   }).join("");
+}
+
+function goalie(p, side) {
+  const name = p[side + "_starter_name"];
+  if (!name) return `<span class="st">G TBD</span>`;
+  const st = p[side + "_starter_status"];
+  const cls = st === "confirmed" ? "conf" : "";
+  return `${esc(name.split(" ").slice(-1)[0])}${st ? ` <span class="st ${cls}">${esc(st)}</span>` : ""}`;
 }
 
 function renderKpis() {

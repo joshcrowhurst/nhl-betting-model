@@ -35,12 +35,24 @@ def _odds(o) -> str:
 
 
 def _pct(p) -> str:
-    return "—" if p is None or pd.isna(p) else f"{float(p):.0%}"
+    if p is None or pd.isna(p):
+        return "—"
+    return ">99%" if p >= 0.995 else "<1%" if p < 0.005 else f"{float(p):.0%}"
+
+
+def _goalie(p, side: str) -> str:
+    """'Markstrom (confirmed)' style label for a starter."""
+    name = p.get(f"{side}_starter_name")
+    if not isinstance(name, str):
+        return "TBD"
+    status = p.get(f"{side}_starter_status")
+    last = name.split()[-1]
+    return html.escape(f"{last} ({status})" if isinstance(status, str) else last)
 
 
 def _cell(content: str, align: str = "left", extra: str = "") -> str:
     return (f'<td style="padding:10px 12px;border-bottom:1px solid {RULE};'
-            f'text-align:{align};{extra}">{content}</td>')
+            f'text-align:{align};vertical-align:top;{extra}">{content}</td>')
 
 
 def _head(cols: list[tuple[str, str]]) -> str:
@@ -64,11 +76,21 @@ def build_html(game_date: date, today: pd.DataFrame, last_results: pd.DataFrame,
             value = (f'<span style="background:{GOLD};color:{INK};font-weight:700;padding:2px 6px;'
                      f'border-radius:4px;font-size:12px">VALUE {esc(str(p["value_team"]))} '
                      f'{_odds(p["value_odds"])}</span>')
-        pick_rows += "<tr>" + _cell(f'{esc(p["away_team"])} <span style="color:{MUTED}">@</span> {esc(p["home_team"])}') \
-            + _cell(f'<strong style="color:{RED}">{esc(pick)}</strong>', "center") \
-            + _cell(_pct(prob), "center") \
-            + (_cell(f'{_odds(p["away_odds"])} / {_odds(p["home_odds"])}', "center") if has_odds else "") \
-            + _cell(value) + "</tr>"
+        goalies = ""
+        if isinstance(p.get("away_starter_name"), str) or isinstance(p.get("home_starter_name"), str):
+            goalies = (f'<div style="font-size:12px;color:{MUTED};margin-top:2px">'
+                       f'{_goalie(p, "away")} vs {_goalie(p, "home")}</div>')
+        # When a rationale row follows, it carries the divider instead.
+        x = "border-bottom:0;" if isinstance(p.get("rationale"), str) else ""
+        pick_rows += "<tr>" + _cell(f'{esc(p["away_team"])} <span style="color:{MUTED}">@</span> {esc(p["home_team"])}{goalies}', extra=x) \
+            + _cell(f'<strong style="color:{RED}">{esc(pick)}</strong>', "center", x) \
+            + _cell(_pct(prob), "center", x) \
+            + (_cell(f'{_odds(p["away_odds"])} / {_odds(p["home_odds"])}', "center", x) if has_odds else "") \
+            + _cell(value, extra=x) + "</tr>"
+        if isinstance(p.get("rationale"), str):
+            pick_rows += (f'<tr><td colspan="{5 if has_odds else 4}" style="padding:0 12px 12px;'
+                          f'border-bottom:1px solid {RULE};font-size:13px;line-height:1.45;color:{MUTED}">'
+                          f'{esc(p["rationale"])}</td></tr>')
 
     cols = [("Matchup", "left"), ("Pick", "center"), ("Win prob", "center")]
     if has_odds:

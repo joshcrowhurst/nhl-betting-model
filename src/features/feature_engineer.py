@@ -25,6 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import ROLLING_WINDOW_GAMES, MIN_GAMES_FOR_FEATURES
 from src.features.schedule_features import get_schedule_features, enrich_team_games_with_opponent
+from src.features.goalie_features import GoalieHistory, starter_features
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,12 @@ FEATURE_COLS = [
 
     # Goalie matchup — net save% advantage
     "goalie_sv_pct_diff",
+
+    # Tonight's starting goalies — their own track record, and whether they're
+    # the regular starter (low share = backup)
+    "starter_sv_pct_diff",
+    "home_starter_share_l10",
+    "away_starter_share_l10",
 
     # Possession — shot share differential (proxy for Corsi)
     "shot_ratio_diff",
@@ -78,6 +85,15 @@ FEATURE_COLS = [
 ]
 
 
+# Features that are often missing (no boxscore, no odds, unknown starter).
+# XGBoost handles their NaNs, so rows aren't dropped for lacking them.
+OPTIONAL_FEATURE_PREFIXES = (
+    "home_goalie", "away_goalie", "goalie_", "home_starter", "away_starter", "starter_",
+    "home_shot", "away_shot", "shot_ratio", "home_faceoff", "away_faceoff",
+    "home_hits", "away_hits", "market_",
+)
+
+
 def build_features(
     games: pd.DataFrame,
     enriched: pd.DataFrame = None,
@@ -112,6 +128,14 @@ def build_features(
                     "home_faceoff_pct", "away_faceoff_pct", "home_hits", "away_hits"]:
             games[col] = np.nan
 
+    # Starting goalies: an explicit home/away_starter_id (today's games) wins,
+    # otherwise the boxscore starter (completed games).
+    for side in ("home", "away"):
+        explicit = games[f"{side}_starter_id"] if f"{side}_starter_id" in games.columns else pd.Series(np.nan, index=games.index)
+        boxscore = games[f"{side}_goalie_id"] if f"{side}_goalie_id" in games.columns else pd.Series(np.nan, index=games.index)
+        games[f"{side}_starter_id"] = explicit.where(explicit.notna(), boxscore)
+    goalie_hist = GoalieHistory(games)
+
     # Compute Elo ratings in chronological order (mutates a dict in-place)
     elo_ratings = _compute_elo_series(games)
 
@@ -122,6 +146,7 @@ def build_features(
         prior = games[games["date"] < row["date"]]
         features = _build_row_features(row, prior, elo_ratings)
         if features is not None:
+            features.update(starter_features(goalie_hist, row))
             features["game_id"] = row["game_id"]
             features["date"] = row["date"]
             features["season"] = row["season"]

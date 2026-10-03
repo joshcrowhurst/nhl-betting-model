@@ -15,7 +15,8 @@ from config import PREDICTIONS_LOG, RUNS_LOG
 
 COLUMNS = [
     "game_id", "game_date", "season", "game_type", "home_team", "away_team",
-    "home_win_prob", "away_win_prob", "predicted_winner",
+    "home_win_prob", "away_win_prob", "predicted_winner", "rationale",
+    "home_starter_name", "home_starter_status", "away_starter_name", "away_starter_status",
     "market_home_prob", "home_odds", "away_odds", "home_ev", "away_ev",
     "is_value_bet", "value_team", "value_odds", "value_ev",
     "home_score", "away_score", "actual_home_win", "correct", "value_bet_correct",
