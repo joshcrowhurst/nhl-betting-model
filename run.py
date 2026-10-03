@@ -230,19 +230,13 @@ def cmd_compare_goalie(args) -> None:
     logger.info("Building features...")
     features = build_features(df, enriched=enriched)
 
-    full = get_feature_cols(include_market=False)
-    starter_cols = ["starter_sv_pct_diff", "home_starter_share_l10", "away_starter_share_l10"]
-    base = [c for c in full if c not in starter_cols]
-    # The default XGBoost settings fit training data far better than new games
-    # (train AUC ~0.9 vs ~0.6 out of sample), so also test a heavily
-    # regularized model: weak signals like goalie form may only show up there.
-    regularized = {"n_estimators": 300, "max_depth": 2, "learning_rate": 0.03,
-                   "min_child_weight": 50, "subsample": 0.7, "colsample_bytree": 0.7, "reg_lambda": 10.0}
+    from src.features.feature_engineer import STARTER_FEATURE_COLS
+    from src.models.moneyline_model import PREVIOUS_PARAMS
+    base = get_feature_cols(include_market=False)
     variants = {
-        "baseline": (base, None),
-        "with starting goalie": (full, None),
-        "regularized baseline": (base, regularized),
-        "regularized + starting goalie": (full, regularized),
+        "current model": (base, None),
+        "current + starting goalie": (base + STARTER_FEATURE_COLS, None),
+        "previous (deeper) model": (base, PREVIOUS_PARAMS),
     }
 
     test = features[features["date"] >= pd.Timestamp(args.start_date)]

@@ -40,11 +40,8 @@ FEATURE_COLS = [
     # Goalie matchup — net save% advantage
     "goalie_sv_pct_diff",
 
-    # Tonight's starting goalies — their own track record, and whether they're
-    # the regular starter (low share = backup)
-    "starter_sv_pct_diff",
-    "home_starter_share_l10",
-    "away_starter_share_l10",
+    # Tonight's starting goalies (STARTER_FEATURE_COLS) are computed but not
+    # used: backtests showed no gain over the team-level goalie feature above.
 
     # Possession — shot share differential (proxy for Corsi)
     "shot_ratio_diff",
@@ -84,6 +81,10 @@ FEATURE_COLS = [
     "market_home_prob",
 ]
 
+
+# Starting-goalie features: built by build_features and shown in the
+# explanations' source data, but left out of the model (see FEATURE_COLS).
+STARTER_FEATURE_COLS = ["starter_sv_pct_diff", "home_starter_share_l10", "away_starter_share_l10"]
 
 # Features that are often missing (no boxscore, no odds, unknown starter).
 # XGBoost handles their NaNs, so rows aren't dropped for lacking them.

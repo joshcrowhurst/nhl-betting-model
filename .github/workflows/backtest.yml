@@ -35,7 +35,7 @@ jobs:
           key: nhl-raw-${{ github.run_id }}
           restore-keys: nhl-raw-
 
-      - name: Backtest with vs without starting goalie
+      - name: Backtest current model vs variants
         run: python run.py compare-goalie
 
       - uses: actions/cache/save@v4

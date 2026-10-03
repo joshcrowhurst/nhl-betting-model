@@ -28,18 +28,28 @@ from src.features.feature_engineer import get_feature_cols
 
 logger = logging.getLogger(__name__)
 
+# Shallow, strongly regularized trees. The previous settings (depth 4, 400
+# trees, min_child_weight 3) scored ~0.9 AUC on training data but ~0.59 on new
+# games; these cut log loss 0.6762 -> 0.6725 and lift AUC 0.595 -> 0.609 in the
+# walk-forward backtest over 2023-24 to 2025-26 (run.py compare-goalie).
 DEFAULT_PARAMS = {
-    "n_estimators": 400,
-    "max_depth": 4,
-    "learning_rate": 0.05,
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
-    "min_child_weight": 3,
+    "n_estimators": 300,
+    "max_depth": 2,
+    "learning_rate": 0.03,
+    "subsample": 0.7,
+    "colsample_bytree": 0.7,
+    "min_child_weight": 50,
     "gamma": 0.1,
-    "reg_lambda": 1.5,
+    "reg_lambda": 10.0,
     "eval_metric": "logloss",
     "random_state": 42,
     "n_jobs": -1,
+}
+
+PREVIOUS_PARAMS = {
+    **DEFAULT_PARAMS,
+    "n_estimators": 400, "max_depth": 4, "learning_rate": 0.05, "subsample": 0.8,
+    "colsample_bytree": 0.8, "min_child_weight": 3, "reg_lambda": 1.5,
 }
 
 
