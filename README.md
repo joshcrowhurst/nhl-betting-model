@@ -10,8 +10,8 @@ It costs nothing to run.
 
 | When (ET, approx.) | What |
 |---|---|
-| ~11:45 AM daily | Record last night's results, predict today's games, email the picks |
-| ~2:15 PM daily | Catch-up run in case the morning run started late or failed. It only predicts games not yet predicted, so you won't get a duplicate email |
+| ~10:15 AM daily | Record last night's results, predict today's games, email the picks |
+| ~11:45 AM and ~2:15 PM daily | Backup runs, because GitHub sometimes starts scheduled runs hours late or skips them. They only predict games not yet predicted, so you won't get a duplicate email |
 | ~4:30 AM Mondays | Retrain the model on the last 6 seasons |
 
 Every pick shows the starting goalies and a two- or three-sentence explanation.
