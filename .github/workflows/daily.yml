@@ -4,10 +4,12 @@ on:
   schedule:
     # Times are UTC. GitHub may start scheduled runs late, so the second run is
     # a safety net; it only predicts games the first run missed.
-    # The main run waits until late morning so most starting goalies are
-    # confirmed (they're usually announced after the morning skate).
-    - cron: "47 15 * * *"   # ~11:47 AM ET (10:47 AM in winter): resolve, predict, email
-    - cron: "13 18 * * *"   # ~2:13 PM ET: catch-up if the morning run was late or failed
+    # GitHub often starts scheduled runs late or skips them, so there are three
+    # chances a day. Each only predicts games not yet predicted, so whichever
+    # runs first sends the email and the others add nothing.
+    - cron: "13 14 * * *"   # ~10:13 AM ET (9:13 AM in winter): resolve, predict, email
+    - cron: "47 15 * * *"   # ~11:47 AM ET: backup
+    - cron: "13 18 * * *"   # ~2:13 PM ET: second backup
     - cron: "29 8 * * 1"    # Monday ~4:29 AM ET: resolve + weekly retrain
   workflow_dispatch:
     inputs:
