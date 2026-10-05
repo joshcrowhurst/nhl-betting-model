@@ -48,6 +48,38 @@ trains the model, which takes about 45 minutes. Later runs take a few minutes.
 
 The dashboard will be at `https://<your-user>.github.io/nhl-betting-model/`.
 
+## Reliable start times (Google Cloud Scheduler)
+
+GitHub's built-in schedule is best-effort and has started runs 3–4 hours late.
+`infra/cloud-scheduler.sh` sets up three Cloud Scheduler jobs that start the
+workflow on time via GitHub's API. Three jobs are within Cloud Scheduler's free
+allowance. The GitHub schedule in `daily.yml` stays as a fallback; extra runs
+are harmless.
+
+| Job | When (ET, follows daylight saving) | Tasks |
+|---|---|---|
+| `nhl-gh-daily` | 10:13 AM daily | resolve, predict, email |
+| `nhl-gh-daily-backup` | 1:13 PM daily | catch-up |
+| `nhl-gh-retrain` | 4:29 AM Mondays | resolve, retrain |
+
+Setup:
+1. Delete the old scheduler jobs first (see the shutdown section below), so the
+   three new ones stay within the free allowance.
+2. Create a GitHub **fine-grained** personal access token: GitHub → Settings →
+   Developer settings → Fine-grained tokens → Generate. Under *Repository access*,
+   choose only `nhl-betting-model`. Under *Permissions → Actions*, choose
+   **Read and write**. Leave everything else as no access.
+3. In [Cloud Shell](https://shell.cloud.google.com), with this repo cloned:
+   ```bash
+   GITHUB_TOKEN=github_pat_... ./infra/cloud-scheduler.sh
+   gcloud scheduler jobs run nhl-gh-daily --location=us-central1   # test: starts a run
+   ```
+   The test should show a new *Daily NHL picks* run in the Actions tab within a minute.
+
+The token is stored in the job's request headers, which only people with access
+to the GCP project can read. If the token expires, re-run the script with a new
+one; it updates the existing jobs.
+
 ## Running locally
 
 ```bash
