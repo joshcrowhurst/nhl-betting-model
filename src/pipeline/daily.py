@@ -10,6 +10,8 @@ All dates are US Eastern, which is how the NHL schedules games.
 """
 
 import logging
+import os
+import warnings
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -18,13 +20,14 @@ import pandas as pd
 from config import MODELS_DIR, ODDS_API_KEY
 from src.data.nhl_api import get_multiple_seasons, season_range, current_season_code, get_games_for_date
 from src.data.boxscore_enricher import get_enriched_game_stats
-from src.data.odds_api import get_current_odds, get_consensus_odds, match_odds_to_games, compute_ev
+from src.data.odds_api import get_current_odds, get_consensus_odds, match_odds_to_games
 from src.data.starting_goalies import get_starters
 from src.features.feature_engineer import build_features, get_feature_cols, OPTIONAL_FEATURE_PREFIXES, FEATURE_VERSION
 from src.features.goalie_features import GoalieHistory
 from src.models.moneyline_model import MoneylineModel
 from src.models.explain import contributions, rationale
-from src.pipeline import store
+from src.pipeline import store, pricing
+from src.models import blend
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +126,10 @@ def resolve() -> int:
             preds.at[idx, "away_score"] = int(g["away_score"])
             preds.at[idx, "actual_home_win"] = int(home_won)
             preds.at[idx, "correct"] = (preds.at[idx, "home_win_prob"] > 0.5) == home_won
-            if isinstance(preds.at[idx, "value_team"], str):
-                value_is_home = preds.at[idx, "value_team"] == preds.at[idx, "home_team"]
-                preds.at[idx, "value_bet_correct"] = home_won if value_is_home else not home_won
+            for team_col, out_col in (("value_team", "value_bet_correct"), ("shop_team", "shop_bet_correct")):
+                if isinstance(preds.at[idx, team_col], str):
+                    on_home = preds.at[idx, team_col] == preds.at[idx, "home_team"]
+                    preds.at[idx, out_col] = home_won if on_home else not home_won
             preds.at[idx, "resolved_at"] = _now_iso()
             resolved += 1
 
@@ -149,6 +153,12 @@ def _fetch_odds() -> pd.DataFrame | None:
     except Exception as e:
         logger.warning(f"Odds fetch failed — predicting without odds: {e}")
         return None
+
+
+def _iso(val) -> str | None:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    return pd.Timestamp(val).tz_convert("UTC").isoformat() if pd.Timestamp(val).tzinfo else str(val)
 
 
 def _sf(val) -> float | None:
@@ -197,6 +207,7 @@ def predict(model: MoneylineModel, game_date: date | None = None) -> pd.DataFram
         targets = match_odds_to_games(consensus, targets.assign(date=day_ts))
 
     contribs = contributions(model, features) if not features.empty else None
+    coefs = blend.load(pricing.BLEND_PATH)
 
     rows = []
     for _, game in targets.iterrows():
@@ -214,15 +225,7 @@ def predict(model: MoneylineModel, game_date: date | None = None) -> pd.DataFram
         except Exception as e:  # an explanation must never block a prediction
             logger.warning(f"Rationale failed for {game['game_id']}: {e}")
             why = None
-        home_odds, away_odds = _sf(game.get("home_odds")), _sf(game.get("away_odds"))
-        home_ev = compute_ev(p_home, home_odds) if home_odds else None
-        away_ev = compute_ev(1 - p_home, away_odds) if away_odds else None
-
-        value_team = value_odds = value_ev = None
-        if home_ev is not None and home_ev > 0 and (away_ev is None or home_ev >= away_ev):
-            value_team, value_odds, value_ev = game["home_team"], home_odds, home_ev
-        elif away_ev is not None and away_ev > 0:
-            value_team, value_odds, value_ev = game["away_team"], away_odds, away_ev
+        priced = pricing.price(p_home, game.to_dict(), coefs)
 
         rows.append({
             "game_id": int(game["game_id"]),
@@ -235,27 +238,75 @@ def predict(model: MoneylineModel, game_date: date | None = None) -> pd.DataFram
             "away_win_prob": round(1 - p_home, 4),
             "predicted_winner": favoured,
             "rationale": why,
-            "market_home_prob": _sf(game.get("market_home_prob")),
-            "home_odds": home_odds,
-            "away_odds": away_odds,
-            "home_ev": home_ev,
-            "away_ev": away_ev,
+            **priced,
+            "odds_source": "live" if priced["home_odds"] is not None else None,
+            "commence_time": _iso(game.get("commence_time")),
             **{f"{side}_starter{suffix}": game.get(f"{side}_starter{suffix}")
                for side in ("home", "away") for suffix in ("_name", "_status")},
-            "is_value_bet": value_team is not None,
-            "value_team": value_team,
-            "value_odds": value_odds,
-            "value_ev": value_ev,
             "logged_at": _now_iso(),
         })
 
     new = pd.DataFrame(rows, columns=store.COLUMNS)
     if not new.empty:
-        store.save_predictions(pd.concat([preds, new], ignore_index=True) if not preds.empty else new)
+        with warnings.catch_warnings():  # all-empty columns (e.g. no odds yet) are expected
+            warnings.simplefilter("ignore", FutureWarning)
+            combined = pd.concat([preds, new], ignore_index=True) if not preds.empty else new
+        store.save_predictions(combined)
     store.log_run("predict", "success", date=str(game_date), predicted=len(new),
                   odds=consensus is not None and not consensus.empty)
     logger.info(f"Predicted {len(new)} game(s) for {game_date}")
     return new
+
+
+# ---------------------------------------------------------------------------
+# Close: record odds shortly before puck drop
+# ---------------------------------------------------------------------------
+
+def close(game_date: date | None = None) -> int:
+    """
+    Snapshot current odds for today's predicted games that haven't started, as
+    their closing line. Run shortly before puck drop (Cloud Scheduler: 6:40 PM
+    and 9:40 PM ET); a later snapshot overwrites an earlier one, so each game
+    keeps the last price before it started. Comparing the price at pick time
+    with the close (closing-line value) is the quickest test of a real edge.
+    """
+    game_date = game_date or today_et()
+    preds = store.load_predictions()
+    mask = preds["game_date"] == game_date.isoformat()
+    if not mask.any():
+        store.log_run("close", "success", updated=0, note="no predictions today")
+        return 0
+
+    todays = get_games_for_date(game_date, game_types=(2, 3))
+    not_started = set(todays.loc[todays["game_state"].isin(NOT_STARTED), "game_id"]) if not todays.empty else set()
+    idxs = [i for i in preds.index[mask] if int(preds.at[i, "game_id"]) in not_started]
+    if not idxs:
+        store.log_run("close", "success", updated=0, note="all games started")
+        return 0
+
+    consensus = _fetch_odds()
+    if consensus is None or consensus.empty:
+        store.log_run("close", "success", updated=0, note="no odds")
+        return 0
+    games = preds.loc[idxs, ["game_id", "home_team", "away_team"]].assign(date=pd.Timestamp(game_date))
+    matched = match_odds_to_games(consensus, games).set_index("game_id")
+
+    updated = 0
+    now = _now_iso()
+    for i in idxs:
+        gid = preds.at[i, "game_id"]
+        if gid not in matched.index or pd.isna(matched.at[gid, "home_odds"]):
+            continue
+        m = matched.loc[gid]
+        preds.at[i, "close_home_odds"] = float(m["home_odds"])
+        preds.at[i, "close_away_odds"] = float(m["away_odds"])
+        preds.at[i, "close_home_prob"] = round(float(m["market_home_prob"]), 4)
+        preds.at[i, "close_at"] = now
+        updated += 1
+    store.save_predictions(preds)
+    store.log_run("close", "success", updated=updated)
+    logger.info(f"Recorded closing odds for {updated} game(s)")
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +337,18 @@ def run(tasks: set[str], send_email: bool = True, force_email: bool = False) -> 
         if send_email and ((new is not None and not new.empty) or force_email):
             from src.pipeline.emailer import send_daily_email
             step("email", lambda: send_daily_email(today_et()))
+
+    if "close" in tasks:
+        step("close", close)
+
+    # Historical odds (paid Odds API plan). ODDS_MAX_CREDITS caps what one run may spend.
+    max_credits = int(os.getenv("ODDS_MAX_CREDITS", "12000"))
+    if "backfill" in tasks:
+        from src.pipeline.market import backfill_predictions
+        step("backfill", lambda: backfill_predictions(max_credits))
+    if "market" in tasks:
+        from src.pipeline.market import compare_market
+        step("market", lambda: compare_market(max_credits=max_credits))
 
     if failures:
         raise SystemExit(f"Failed steps: {', '.join(failures)}")

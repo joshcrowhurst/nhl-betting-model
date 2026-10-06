@@ -28,6 +28,7 @@ TEAM_NAME_TO_ABBREV = {
     "Anaheim Ducks": "ANA",
     "Arizona Coyotes": "ARI",
     "Utah Hockey Club": "UTA",
+    "Utah Mammoth": "UTA",
     "Boston Bruins": "BOS",
     "Buffalo Sabres": "BUF",
     "Calgary Flames": "CGY",
@@ -60,7 +61,17 @@ TEAM_NAME_TO_ABBREV = {
     "Winnipeg Jets": "WPG",
 }
 
+# Alternate spellings seen in odds feeds
+TEAM_NAME_TO_ABBREV.update({
+    "Montréal Canadiens": "MTL",
+    "St Louis Blues": "STL",
+    "Utah HC": "UTA",
+})
+
 ABBREV_TO_TEAM_NAME = {v: k for k, v in TEAM_NAME_TO_ABBREV.items()}
+
+# Credits left on the API key, from the last response header (None until a call is made)
+LAST_REMAINING: int | None = None
 
 
 def name_to_abbrev(name: str) -> str | None:
@@ -74,9 +85,14 @@ def _get(endpoint: str, params: dict = None) -> dict | list:
     params["apiKey"] = ODDS_API_KEY
     url = f"{ODDS_API_BASE}/{endpoint}"
     resp = SESSION.get(url, params=params, timeout=15)
+    global LAST_REMAINING
     remaining = resp.headers.get("x-requests-remaining")
     if remaining:
-        logger.info(f"Odds API requests remaining: {remaining}")
+        try:
+            LAST_REMAINING = int(float(remaining))
+        except ValueError:
+            pass
+        logger.info(f"Odds API credits remaining: {remaining} (last call used {resp.headers.get('x-requests-last')})")
     resp.raise_for_status()
     return resp.json()
 
@@ -91,32 +107,33 @@ def get_current_odds() -> pd.DataFrame:
     return _add_abbrevs(df)
 
 
-def get_historical_odds(event_date: date) -> pd.DataFrame:
+def get_historical_odds(at: datetime) -> pd.DataFrame:
     """
-    Fetch historical odds for games on a specific date.
-    Caches to disk to preserve API quota.
+    Odds as they stood at `at` (UTC), from the historical endpoint.
+    Paid plans only; each call costs 10 credits per region and market.
+    Snapshots are cached on disk, so re-running a backfill is free.
     """
-    date_str = event_date.strftime("%Y-%m-%d")
-    cache_path = RAW_DIR / f"odds_{date_str}.json"
+    ts = pd.Timestamp(at).tz_convert("UTC") if pd.Timestamp(at).tzinfo else pd.Timestamp(at).tz_localize("UTC")
+    iso = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    cache_dir = RAW_DIR / "odds_hist"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{iso.replace(':', '')}.json"
 
     if cache_path.exists():
         data = json.loads(cache_path.read_text())
     else:
-        iso = f"{date_str}T00:00:00Z"
         data = _get(
-            f"sports/{ODDS_SPORT}/odds-history",
-            params={
-                "regions": ODDS_REGIONS,
-                "markets": ODDS_MARKETS,
-                "oddsFormat": "american",
-                "date": iso,
-            },
+            f"historical/sports/{ODDS_SPORT}/odds",
+            params={"regions": ODDS_REGIONS, "markets": ODDS_MARKETS,
+                    "oddsFormat": "american", "date": iso},
         )
         cache_path.write_text(json.dumps(data))
-        time.sleep(0.5)
+        time.sleep(0.2)
 
-    raw = data.get("data", data) if isinstance(data, dict) else data
+    raw = data.get("data", []) if isinstance(data, dict) else data
     df = _parse_odds(raw)
+    if not df.empty:
+        df["snapshot"] = data.get("timestamp", iso) if isinstance(data, dict) else iso
     return _add_abbrevs(df)
 
 
@@ -126,7 +143,8 @@ def get_consensus_odds(df: pd.DataFrame) -> pd.DataFrame:
         return df
     grp_cols = ["event_id", "home_team", "away_team", "home_abbrev", "away_abbrev", "commence_time"]
     grp_cols = [c for c in grp_cols if c in df.columns]
-    return (
+    df = df.dropna(subset=["home_odds_american", "away_odds_american"])
+    out = (
         df.groupby(grp_cols)
         .agg(
             home_odds_median=("home_odds_american", "median"),
@@ -137,6 +155,14 @@ def get_consensus_odds(df: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
+    # Best available price on each side (for American odds, higher is always
+    # better for the bettor) and which bookmaker offers it.
+    for side in ("home", "away"):
+        idx = df.groupby(grp_cols)[f"{side}_odds_american"].idxmax()
+        best = df.loc[idx, grp_cols + [f"{side}_odds_american", "bookmaker"]].rename(
+            columns={f"{side}_odds_american": f"best_{side}_odds", "bookmaker": f"best_{side}_book"})
+        out = out.merge(best, on=grp_cols, how="left")
+    return out
 
 
 def match_odds_to_games(consensus: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
@@ -164,8 +190,13 @@ def match_odds_to_games(consensus: pd.DataFrame, games: pd.DataFrame) -> pd.Data
         "away_odds_median": "away_odds",
     })
     keep = ["date", "home_team", "away_team", "market_home_prob",
-            "market_away_prob", "home_odds", "away_odds", "num_books"]
+            "market_away_prob", "home_odds", "away_odds", "num_books",
+            "best_home_odds", "best_home_book", "best_away_odds", "best_away_book", "commence_time"]
     odds = odds[[c for c in keep if c in odds.columns]]
+    # Doubleheaders don't happen in the NHL, so date + teams identifies a game.
+    odds = odds.drop_duplicates(subset=["date", "home_team", "away_team"])
+    games = games.drop(columns=[c for c in odds.columns if c in games.columns
+                                and c not in ("date", "home_team", "away_team")])
 
     return games.merge(odds, on=["date", "home_team", "away_team"], how="left")
 

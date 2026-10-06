@@ -18,9 +18,20 @@ COLUMNS = [
     "home_win_prob", "away_win_prob", "predicted_winner", "rationale",
     "home_starter_name", "home_starter_status", "away_starter_name", "away_starter_status",
     "market_home_prob", "home_odds", "away_odds", "home_ev", "away_ev",
-    "is_value_bet", "value_team", "value_odds", "value_ev",
-    "home_score", "away_score", "actual_home_win", "correct", "value_bet_correct",
+    "bet_home_prob", "prob_source", "odds_source", "commence_time",
+    "best_home_odds", "best_home_book", "best_away_odds", "best_away_book",
+    "is_value_bet", "value_team", "value_odds", "value_ev", "value_stake",
+    "shop_team", "shop_odds", "shop_book", "shop_ev",
+    "close_home_odds", "close_away_odds", "close_home_prob", "close_at",
+    "home_score", "away_score", "actual_home_win", "correct", "value_bet_correct", "shop_bet_correct",
     "logged_at", "resolved_at",
+]
+
+TEXT_COLUMNS = [
+    "rationale", "home_starter_name", "home_starter_status", "away_starter_name", "away_starter_status",
+    "prob_source", "odds_source", "commence_time", "best_home_book", "best_away_book",
+    "value_team", "shop_team", "shop_book", "close_at", "is_value_bet", "correct",
+    "value_bet_correct", "shop_bet_correct", "logged_at", "resolved_at",
 ]
 
 MAX_RUNS_KEPT = 500
@@ -33,6 +44,10 @@ def load_predictions() -> pd.DataFrame:
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = None
+    # Text columns that are often all-empty load as float; keep them as object
+    # so writing a string into them later doesn't upcast with warnings.
+    for col in TEXT_COLUMNS:
+        df[col] = df[col].astype(object)
     return df[COLUMNS]
 
 

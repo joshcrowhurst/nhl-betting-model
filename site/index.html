@@ -51,7 +51,7 @@
   h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 12px; font-weight: 800; }
   h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); margin-left: 6px; }
 
-  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
   .kpi { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; border-top: 4px solid var(--red); }
   .kpi .label { font-size: 12px; color: var(--muted); font-weight: 600; }
   .kpi .value { font-size: 28px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -73,6 +73,7 @@
   .why { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
   .meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--muted); align-items: center; }
   .badge { background: var(--gold); color: var(--ink); font-weight: 800; font-size: 12px; border-radius: 4px; padding: 2px 7px; }
+  .badge.shop { background: #fff; border: 1px solid var(--gold); color: var(--ink-2); }
   .badge.final { background: var(--track); color: var(--ink-2); }
   .empty { background: var(--card); border: 1px dashed var(--rule); border-radius: 10px; padding: 22px; color: var(--muted); text-align: center; }
 
@@ -211,7 +212,8 @@ function renderToday() {
       <div class="meta">
         <span>Pick <strong style="color:var(--ink)">${esc(p.predicted_winner)}</strong></span>
         ${p.home_odds != null ? `<span>Odds ${odds(p.away_odds)} / ${odds(p.home_odds)}</span>` : ""}
-        ${value ? `<span class="badge">VALUE ${esc(p.value_team)} ${odds(p.value_odds)}</span>` : ""}
+        ${value ? `<span class="badge">VALUE ${esc(p.value_team)} ${odds(p.value_odds)}${p.value_stake != null ? ` · stake ${pct(p.value_stake, 1)}` : ""}</span>` : ""}
+        ${p.shop_team ? `<span class="badge shop" title="A bookmaker's price beats the consensus fair price">BEST PRICE ${esc(p.shop_team)} ${odds(p.shop_odds)} · ${esc(book(p.shop_book))}</span>` : ""}
         ${final ? `<span class="badge final">FINAL ${p.away_score}–${p.home_score} ${truthy(p.correct) ? "✓" : "✗"}</span>` : ""}
       </div></div>`;
   }).join("");
@@ -225,6 +227,11 @@ function goalie(p, side) {
   return `${esc(name.split(" ").slice(-1)[0])}${st ? ` <span class="st ${cls}">${esc(st)}</span>` : ""}`;
 }
 
+const BOOKS = { draftkings: "DraftKings", fanduel: "FanDuel", betmgm: "BetMGM", williamhill_us: "Caesars",
+  betrivers: "BetRivers", espnbet: "ESPN BET", fanatics: "Fanatics", bovada: "Bovada", betonlineag: "BetOnline",
+  mybookieag: "MyBookie", lowvig: "LowVig", betus: "BetUS", hardrockbet: "Hard Rock", ballybet: "Bally Bet" };
+const book = (k) => BOOKS[k] || String(k || "?").replace(/_/g, " ");
+
 function renderKpis() {
   const s = DATA.seasons[season]?.performance;
   if (!s || !s.resolved) {
@@ -233,12 +240,20 @@ function renderKpis() {
   }
   const losses = s.resolved - s.correct;
   const vbL = s.value_bets - s.value_bets_won;
+  const signed = (x, d = 1) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(d)}%`;
+  const range = s.roi_low != null ? ` (95% range ${signed(s.roi_low, 0)} to ${signed(s.roi_high, 0)})` : "";
   const tiles = [
     ["Picks record", `${s.correct}–${losses}`, `${s.resolved} games`],
     ["Accuracy", pct(s.accuracy, 1), "picking the winner"],
     ["Value bets", s.value_bets ? `${s.value_bets_won}–${vbL}` : "—", s.value_bets ? "flat 1-unit stakes" : "needs odds"],
     ["Value-bet profit", s.value_bets ? `${s.units >= 0 ? "+" : ""}${s.units.toFixed(2)}u` : "—",
-      s.value_bets ? `ROI ${s.roi >= 0 ? "+" : ""}${pct(s.roi, 1)}` : "needs odds"],
+      s.value_bets ? `ROI ${signed(s.roi)}${range}` : "needs odds"],
+    ["Kelly bankroll", s.kelly_growth != null ? signed(s.kelly_growth) : "—",
+      s.kelly_growth != null ? "quarter-Kelly stakes on value bets" : "needs odds"],
+    ["Beat the close", s.clv_bets ? pct(s.clv_beat_pct, 0) : "—",
+      s.clv_bets ? `avg closing-line value ${signed(s.clv_avg)} over ${s.clv_bets} bets` : "value bets vs closing odds"],
+    ["Price shop", s.shop_bets ? `${s.shop_won}–${s.shop_bets - s.shop_won}` : "—",
+      s.shop_bets ? `${s.shop_units >= 0 ? "+" : ""}${s.shop_units.toFixed(2)}u, ROI ${signed(s.shop_roi)}` : "best price vs consensus"],
   ];
   $("kpis").innerHTML = tiles.map(([l, v, n]) =>
     `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
