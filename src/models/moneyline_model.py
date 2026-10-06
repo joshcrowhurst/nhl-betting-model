@@ -46,6 +46,9 @@ DEFAULT_PARAMS = {
     "n_jobs": -1,
 }
 
+# Predictions are kept within [PROB_FLOOR, 1 - PROB_FLOOR].
+PROB_FLOOR = 0.03
+
 PREVIOUS_PARAMS = {
     **DEFAULT_PARAMS,
     "n_estimators": 400, "max_depth": 4, "learning_rate": 0.05, "subsample": 0.8,
@@ -94,7 +97,9 @@ class MoneylineModel:
         if self._model is None:
             raise RuntimeError("Model not trained yet.")
         X_feat = X[self.feature_cols].copy()
-        return self._model.predict_proba(X_feat)[:, 1]
+        # Isotonic calibration can map the extremes to exactly 0 or 1. No NHL
+        # game is that certain, and one such miss dominates log loss.
+        return np.clip(self._model.predict_proba(X_feat)[:, 1], PROB_FLOOR, 1 - PROB_FLOOR)
 
     def evaluate(self, X: pd.DataFrame, y: pd.Series, label: str = "eval") -> dict:
         probs = self.predict_proba(X)
