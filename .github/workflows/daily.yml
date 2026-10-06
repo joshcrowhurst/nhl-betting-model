@@ -11,11 +11,16 @@ on:
     - cron: "47 15 * * *"   # ~11:47 AM ET: backup
     - cron: "13 18 * * *"   # ~2:13 PM ET: second backup
     - cron: "29 8 * * 1"    # Monday ~4:29 AM ET: resolve + weekly retrain
+    - cron: "40 22 * * *"   # ~6:40 PM ET: closing odds for 7 PM games
+    - cron: "40 1 * * *"    # ~9:40 PM ET: closing odds for West Coast games
   workflow_dispatch:
     inputs:
       tasks:
-        description: "Comma list of resolve, retrain, predict"
+        description: "Comma list of resolve, retrain, predict, close, backfill, market"
         default: "resolve,predict"
+      max_credits:
+        description: "Most Odds API credits a backfill/market run may spend"
+        default: "12000"
       force_email:
         description: "Email today's picks even if none are new"
         type: boolean
@@ -56,6 +61,7 @@ jobs:
           NHL_DATA_DIR: state/data
           NHL_MODELS_DIR: state/models
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          ODDS_MAX_CREDITS: ${{ inputs.max_credits || '12000' }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
@@ -66,6 +72,8 @@ jobs:
             [ "${{ inputs.force_email }}" = "true" ] && EXTRA="--force-email"
           elif [ "${{ github.event.schedule }}" = "29 8 * * 1" ]; then
             TASKS="resolve,retrain"
+          elif [ "${{ github.event.schedule }}" = "40 22 * * *" ] || [ "${{ github.event.schedule }}" = "40 1 * * *" ]; then
+            TASKS="close"
           else
             TASKS="resolve,predict"
           fi

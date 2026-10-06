@@ -31,7 +31,8 @@ WIN = "#1E7B3C"
 def _odds(o) -> str:
     if o is None or pd.isna(o):
         return "—"
-    return f"+{int(o)}" if o > 0 else str(int(o))
+    o = int(round(float(o)))
+    return f"+{o}" if o > 0 else str(o)
 
 
 def _pct(p) -> str:
@@ -48,6 +49,18 @@ def _goalie(p, side: str) -> str:
     status = p.get(f"{side}_starter_status")
     last = name.split()[-1]
     return html.escape(f"{last} ({status})" if isinstance(status, str) else last)
+
+
+BOOKS = {
+    "draftkings": "DraftKings", "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars",
+    "caesars": "Caesars", "betrivers": "BetRivers", "espnbet": "ESPN BET", "fanatics": "Fanatics",
+    "bovada": "Bovada", "betonlineag": "BetOnline", "mybookieag": "MyBookie", "lowvig": "LowVig",
+    "betus": "BetUS", "pointsbetus": "PointsBet", "hardrockbet": "Hard Rock", "ballybet": "Bally Bet",
+}
+
+
+def book_name(key) -> str:
+    return BOOKS.get(key, str(key).replace("_", " ").title()) if isinstance(key, str) else "?"
 
 
 def _cell(content: str, align: str = "left", extra: str = "") -> str:
@@ -73,9 +86,15 @@ def build_html(game_date: date, today: pd.DataFrame, last_results: pd.DataFrame,
         prob = p["home_win_prob"] if pick == p["home_team"] else p["away_win_prob"]
         value = ""
         if _truthy(pd.Series([p["is_value_bet"]])).iloc[0]:
+            stake = p.get("value_stake")
+            stake_txt = f" · stake {float(stake):.1%}" if stake is not None and not pd.isna(stake) else ""
             value = (f'<span style="background:{GOLD};color:{INK};font-weight:700;padding:2px 6px;'
-                     f'border-radius:4px;font-size:12px">VALUE {esc(str(p["value_team"]))} '
-                     f'{_odds(p["value_odds"])}</span>')
+                     f'border-radius:4px;font-size:12px;white-space:nowrap">VALUE {esc(str(p["value_team"]))} '
+                     f'{_odds(p["value_odds"])}{stake_txt}</span>')
+        if isinstance(p.get("shop_team"), str):
+            value += (f'<div style="font-size:12px;color:{MUTED};margin-top:4px">Best price: '
+                      f'<strong style="color:{INK}">{esc(p["shop_team"])} {_odds(p["shop_odds"])}</strong> '
+                      f'at {esc(book_name(p.get("shop_book")))} ({float(p["shop_ev"]):+.1%})</div>')
         goalies = ""
         if isinstance(p.get("away_starter_name"), str) or isinstance(p.get("home_starter_name"), str):
             goalies = (f'<div style="font-size:12px;color:{MUTED};margin-top:2px">'
@@ -99,7 +118,11 @@ def build_html(game_date: date, today: pd.DataFrame, last_results: pd.DataFrame,
     picks_table = (f'<table style="width:100%;border-collapse:collapse;font-size:14px">'
                    f'{_head(cols)}{pick_rows}</table>')
 
-    odds_note = "" if has_odds else (
+    odds_note = (
+        f'<p style="margin:12px 0 0;font-size:12px;color:{MUTED}">Odds are the median across US bookmakers. '
+        f'Value = positive expected value at that price; stake = quarter-Kelly, as % of bankroll. '
+        f'Best price = a bookmaker beating the consensus fair price, regardless of the model.</p>'
+    ) if has_odds else (
         f'<p style="margin:12px 0 0;font-size:12px;color:{MUTED}">Odds unavailable today, '
         f'so no value-bet flags. Set the ODDS_API_KEY secret to enable them.</p>')
 

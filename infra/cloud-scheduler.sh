@@ -4,8 +4,9 @@
 # schedule stays in daily.yml as a fallback (runs are idempotent, so extra
 # runs add nothing).
 #
-# Uses 3 jobs, which is Cloud Scheduler's free allowance per billing account,
-# so delete the old nhl-predict / nhl-resolve / nhl-retrain jobs first.
+# Uses 5 jobs. The first 3 per billing account are free; the 2 closing-odds
+# jobs cost $0.10/month each. Delete the old nhl-predict / nhl-resolve /
+# nhl-retrain jobs first so they don't count against the free 3.
 #
 # Usage (e.g. in Cloud Shell):
 #   GITHUB_TOKEN=github_pat_... ./infra/cloud-scheduler.sh
@@ -29,6 +30,8 @@ JOBS=(
   "nhl-gh-daily|13 10 * * *|resolve,predict"
   "nhl-gh-daily-backup|13 13 * * *|resolve,predict"
   "nhl-gh-retrain|29 4 * * 1|resolve,retrain"
+  "nhl-gh-close|40 18 * * *|close"
+  "nhl-gh-close-late|40 21 * * *|close"
 )
 
 for job in "${JOBS[@]}"; do
