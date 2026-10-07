@@ -160,7 +160,7 @@ def backfill_predictions(max_credits: int = 2000) -> dict:
 def season_odds(schedule: pd.DataFrame, season: str, budget: Budget) -> pd.DataFrame:
     """Morning consensus odds for every game in a season's schedule (cached per season)."""
     SEASON_CACHE.mkdir(parents=True, exist_ok=True)
-    path = SEASON_CACHE / f"season_{season}.parquet"
+    path = SEASON_CACHE / f"season_v2_{season}.parquet"  # v2: decimal-median consensus
     have = pd.read_parquet(path) if path.exists() else pd.DataFrame(columns=["game_id"])
     sched = schedule[schedule["season"] == season]
     todo = sched[~sched["game_id"].isin(have["game_id"])]
