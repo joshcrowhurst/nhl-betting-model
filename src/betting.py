@@ -23,6 +23,8 @@ def decimal(american) -> float | None:
     if not _ok(american):
         return None
     a = float(american)
+    if abs(a) < 100:  # not a valid American price
+        return None
     return a / 100 + 1 if a > 0 else 100 / abs(a) + 1
 
 

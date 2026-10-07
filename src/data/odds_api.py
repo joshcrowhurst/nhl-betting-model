@@ -144,17 +144,23 @@ def get_consensus_odds(df: pd.DataFrame) -> pd.DataFrame:
     grp_cols = ["event_id", "home_team", "away_team", "home_abbrev", "away_abbrev", "commence_time"]
     grp_cols = [c for c in grp_cols if c in df.columns]
     df = df.dropna(subset=["home_odds_american", "away_odds_american"])
+    # Take the median of decimal odds, not American: American odds jump from
+    # -100 to +100, so the median of e.g. -105 and +102 would be -1.5.
+    df = df.assign(home_odds_decimal=df["home_odds_american"].map(american_to_decimal),
+                   away_odds_decimal=df["away_odds_american"].map(american_to_decimal))
     out = (
         df.groupby(grp_cols)
         .agg(
-            home_odds_median=("home_odds_american", "median"),
-            away_odds_median=("away_odds_american", "median"),
+            home_odds_median=("home_odds_decimal", "median"),
+            away_odds_median=("away_odds_decimal", "median"),
             home_no_vig_prob=("home_no_vig_prob", "median"),
             away_no_vig_prob=("away_no_vig_prob", "median"),
             num_books=("bookmaker", "count"),
         )
         .reset_index()
     )
+    for side in ("home", "away"):
+        out[f"{side}_odds_median"] = out[f"{side}_odds_median"].map(decimal_to_american)
     # Best available price on each side (for American odds, higher is always
     # better for the bettor) and which bookmaker offers it.
     for side in ("home", "away"):
@@ -337,3 +343,11 @@ def american_to_decimal(odds: float) -> float:
     if odds > 0:
         return (odds / 100) + 1
     return (100 / abs(odds)) + 1
+
+
+def decimal_to_american(odds: float) -> float:
+    if odds is None or pd.isna(odds):
+        return None
+    if odds >= 2:
+        return round((odds - 1) * 100, 1)
+    return round(-100 / (odds - 1), 1)
